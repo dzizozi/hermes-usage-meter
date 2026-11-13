@@ -6,18 +6,18 @@ const src=readFileSync(process.env.USAGE_PLUGIN_PATH||new URL('../desktop/plugin
 function load(){const b={console,Date,Intl,Number,Math,atom:v=>({get:()=>v,set:n=>{v=n}}),jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})};vm.createContext(b);vm.runInContext(src,b);return b}
 const inside=(p,poly)=>{let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])c=!c}return c};
 const crosses=(p,q,r,s)=>{const o=(a,b,c)=>Math.sign((b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]));return o(p,q,r)*o(p,q,s)<0&&o(r,s,p)*o(r,s,q)<0};
-test('45-degree camera: W is a meandering W channel carved into the sloping top of a grounded rock, pouring from its low left end',()=>{
+test('45-degree camera: W is a meandering W groove carved into the flat 5-degree slab of a grounded rock, pouring from its left end',()=>{
  const b=load(),g=b.fluidGeometry(),w=g.weekly,k=Math.SQRT1_2,width=p=>Math.max(...p.map(q=>q[0]))-Math.min(...p.map(q=>q[0]));
  assert.ok(Math.abs(width(g.bamboo)-54*1.1)<1e-9,'approved bamboo size is unchanged');
  assert.equal(g.camera.elevation,45);
- for(let i=0;i<w.ground.length;i++)assert.ok(w.points[i][0]===w.ground[i][0]&&Math.abs(w.points[i][1]-(w.ground[i][1]*k+w.tilt.drop-w.tilt.slope*(w.ground[i][0]-174.5)))<1e-9,'rock top is foreshortened by cos45 and tilted');
- assert.ok(w.tilt.slope>0&&w.tilt.drop>0);
- assert.ok(w.spring[1]<w.lip[1]-20,'the spring end sits clearly higher than the outlet: water runs downhill');
- // the whole tilted plane descends toward the outlet: every right-hand point is raised relative to a level surface
- const level=w.ground.map(p=>p[1]*k);assert.ok(w.points.every((p,i)=>i===0||p[1]-level[i]<=w.points[0][1]-level[0]+1e-9));
+ const sf=w.surfaceTilt;assert.equal(sf.tiltDegrees,5);assert.ok(Math.abs(sf.k-Math.sin(50*Math.PI/180))<1e-12,'level slab seen at 45deg plus a 5deg forward lean');
+ for(let i=0;i<w.ground.length;i++)assert.ok(w.points[i][0]===w.ground[i][0]&&Math.abs(w.points[i][1]-(sf.originY+w.ground[i][1]*sf.k))<1e-9,'W lies in the flat slab, no sideways tilt');
+ assert.ok(Math.abs(w.spring[1]-w.lip[1])<12,'flat: spring and outlet sit at nearly the same height');
+ const xs=w.points.map(p=>p[0]),ys0=w.points.map(p=>p[1]);assert.ok((Math.max(...ys0)-Math.min(...ys0))/(Math.max(...xs)-Math.min(...xs))<.45,'the letter lies down instead of standing toward the viewer');
+ for(let i=1;i<w.bedDepth.length;i++)assert.ok(w.bedDepth[i]<=w.bedDepth[i-1],'the groove deepens toward the outlet');assert.ok(w.bedDepth[0]-w.bedDepth.at(-1)>2.5);
  const P=w.points,inRange=(lo,hi)=>P.filter(p=>p[0]>=lo&&p[0]<=hi).map(p=>p[1]);
  const v1=Math.max(...inRange(198,222)),v2=Math.max(...inRange(244,268)),mid=Math.min(...inRange(225,240));
- assert.ok(v1-mid>18&&v2-mid>12,'two valleys around a raised middle');assert.ok(P[0][1]<v1-15&&P.at(-1)[1]<v2-15,'both W ends rise above the valleys');for(let i=1;i<P.length;i++)assert.ok(P[i][0]>=P[i-1][0]-1e-9,'W reads left to right without loops');
+ assert.ok(v1-mid>15&&v2-mid>15,'two valleys around a raised middle');assert.ok(P[0][1]<v1-15&&P.at(-1)[1]<v2-15,'both W ends rise above the valleys');for(let i=1;i<P.length;i++)assert.ok(P[i][0]>=P[i-1][0]-1e-9,'W reads left to right without loops');
  let turns=0,last=0;for(let i=1;i<P.length-1;i++){const c=Math.sign((P[i][0]-P[i-1][0])*(P[i+1][1]-P[i][1])-(P[i][1]-P[i-1][1])*(P[i+1][0]-P[i][0]));if(c&&last&&c!==last)turns++;if(c)last=c}
  assert.ok(turns>=8,'natural meanders, not a stiff letter: '+turns);
  for(let i=0;i<g.W.length;i++)for(let j=i+2;j<g.W.length;j++){if(i===0&&j===g.W.length-1)continue;assert.ok(!crosses(g.W[i],g.W[i+1],g.W[j],g.W[(j+1)%g.W.length]),'W bed must not self-intersect')}
@@ -198,4 +198,13 @@ test('five interface languages share every key; the widget follows Hermes unless
  assert.equal(b.resolveUsageLanguage('es','ar'),'es');assert.equal(b.resolveUsageLanguage(null,undefined),'en');
  assert.equal(b.countdown('2026-10-19T15:00:00Z',Date.parse('2026-10-20T10:00:00Z'),'fr'),b.usageText('fr').due);
  assert.match(b.countdown('2026-10-20T15:00:00Z',Date.parse('2026-10-20T10:00:00Z'),'zh'),/5 小时 0 分/);
+});
+
+test('the glass rocker rides in the slot of a thicker hollow bamboo post, pinned at its pivot',()=>{
+ const b=load(),json=JSON.stringify(b.bambooScene(40,60,'post-test',true,{progress:.5,artOnly:true})),p=b.BAMBOO_POST;
+ const rocker=Math.max(...[[148,120],[254,120],[254,152],[119,152]].map(b.bambooPoint).map(q=>q[1]))-Math.min(...[[148,120],[254,120],[254,152],[119,152]].map(b.bambooPoint).map(q=>q[1]));
+ assert.ok(2*p.outer>rocker*1.15,'post diameter larger than the rocker');assert.ok(p.inner<p.outer&&2*p.slotHalf>=rocker,'hollow, with a slot wide enough for the rocker');
+ assert.equal(p.x,191);assert.ok(p.top<136&&p.slot>136+rocker/2,'slot runs from above the pivot to below the rocker');
+ for(const a of [45,0,-28]){const g=[[148,120],[254,120],[254,152],[119,152]].map(b.bambooPoint).map(q=>b.rotateFluidPoint(q,a));for(const q of g)if(Math.abs(q[0]-p.x)<Math.sqrt(p.outer**2-p.slotHalf**2))assert.ok(q[1]<p.slot+1,'rocker stays above the slot bottom at '+a)}
+ for(const s of ['data-bamboo-post','data-post-front-prong','data-bamboo-peg'])assert.ok(json.includes(s),s);
 });

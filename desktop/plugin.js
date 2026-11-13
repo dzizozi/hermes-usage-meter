@@ -292,7 +292,10 @@ function makeSessionChannel() {
 }
 // W is carved into the flat top of a boulder that sits on the ground behind the
 // bamboo. Water rises at the right-hand spring and leaves from the left end.
-const WEEKLY_TILT={drop:20,slope:.2};
+// The rock top is a flat slab parallel to the ground, leaning only 5 degrees toward
+// the viewer, so the 45-degree camera sees it at sin(50deg). The W groove itself
+// deepens toward the outlet, which is what carries the water there.
+const WEEKLY_SURFACE={tiltDegrees:5,k:Math.sin(50*Math.PI/180),depthScale:.88,originY:31};
 // A large rocky mountain fills the back of the scene; the boulder stands at its foot.
 // Ridges are layered smooth noise; light comes from the upper left, so every slope
 // that falls to the right is in shade and each valley sends a gully down the face.
@@ -319,10 +322,12 @@ function makeMountain() {
 }
 function makeWeeklyChannel() {
  const k=CAMERA_K,knots=[[174.5,32],[181,31],[187,33],[192,38],[195,44],[196,50],[200,57],[203,62],[207,66],[212,66.5],[216,62.5],[218,56],[221,50],[223,44],[226,40],[230,37.5],[234,37.5],[238,40],[240,44],[241,49],[246,55],[249,61],[253,65.5],[258,66.5],[262,63],[265,57],[268,51],[272,43],[276,35],[281,28],[288,23]];
- // The rock top is not level: it rises toward the spring (right, back) and falls
- // toward the outlet (left, front), so gravity carries the water to the lip.
- const tilt=(p,weight=1)=>[p[0],p[1]+weight*(WEEKLY_TILT.drop-WEEKLY_TILT.slope*(p[0]-174.5))];
- const channel=carvedChannel(catmullRom(knots.map(p=>[p[0],p[1]/k]),5),5,p=>tilt([p[0],p[1]*k]));
+ const S=WEEKLY_SURFACE,toGround=p=>[p[0],(p[1]-23)/k*S.depthScale],project=p=>[p[0],S.originY+p[1]*S.k];
+ // Design-space points (drawn for a level cos45 view) laid onto the 5-degree slab.
+ const tilt=(p,weight=1)=>[p[0],p[1]+weight*(project(toGround(p))[1]-p[1])];
+ const channel=carvedChannel(catmullRom(knots.map(toGround),5),5,project);
+ const last=channel.left.length-1,bedDepth=channel.left.map((_,i)=>1.2+3.4*(1-i/last));
+ const bed=[...channel.left.map((p,i)=>[p[0],p[1]+bedDepth[i]]),...channel.right.map((p,i)=>[p[0],p[1]+bedDepth[i]]).reverse()];
  // Irregular boulder: a weathered flat top (where W is carved) and faceted sides.
  const plateau=catmullRom([[176.5,27],[181,20],[189,15],[200,12.5],[213,11],[226,9],[241,10],[254,8.5],[267,11],[279,13],[288,18],[294.5,27],[295.5,40],[293,54],[290,66],[283,76],[270,81],[255,83.5],[240,82],[226,83],[212,80],[200,75.5],[193,67],[188.5,56],[184.5,45],[179.5,37.5]],4,true);
  const rock=catmullRom([[175,27],[178,19],[186,13],[197,10],[211,8.5],[224,6],[240,7],[252,5.5],[266,8],[279,10],[289,15],[296,24],[298.5,36],[297,50],[299,66],[297,84],[298,100],[294,112],[284,119],[272,123],[258,121.5],[246,118],[236,113],[224,110],[212,108.5],[200,106],[193,101],[190.5,90],[188,76],[185,62],[181,48],[177.5,37]],4,true);
@@ -338,7 +343,7 @@ function makeWeeklyChannel() {
  const end=channel.points.at(-1),back=channel.points.at(-6),dl=Math.hypot(end[0]-back[0],end[1]-back[1]),d=[(end[0]-back[0])/dl,(end[1]-back[1])/dl],n=[-d[1],d[0]];
  const at=(a,b)=>[end[0]+d[0]*a+n[0]*b,end[1]+d[1]*a+n[1]*b];
  const outcrop=catmullRom([at(1.3,-9),at(1.7,-4.5),at(1.2,0),at(1.7,4.5),at(1.5,9.5),at(5,17),[300,40],[308,46],[308,-10],[232,-10],[236,-2],[248,3.5],[262,4],at(10,-17)],4,true);
- return {...channel,lip:channel.points[0],spring:end,springDirection:d,plateau:top,rock:body,facets:faces,outcrop,tilt:WEEKLY_TILT,onRock:lean,surface:'rock',drainsFrom:'source'}
+ return {...channel,lip:channel.points[0],spring:end,springDirection:d,plateau:top,rock:body,facets:faces,outcrop,surfaceTilt:S,bed,bedDepth,onRock:lean,surface:'rock',drainsFrom:'source'}
 }
 function pointInPolygon(p,poly) {let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])c=!c}return c}
 function distanceToPolygon(p,poly) {let d=Infinity;for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy||1,t=Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/l));d=Math.min(d,Math.hypot(p[0]-a[0]-t*dx,p[1]-a[1]-t*dy))}return d}
@@ -363,6 +368,8 @@ function makeGarden(S,W,rock,ground) {
  return {grass,stones,pebbles}
 }
 const BUTTERFLY_PERIOD=30000,BUTTERFLY_VISIT=11000;
+// Support post: thicker than the glass rocker (diameter 19.4), hollow, slotted from the top.
+var BAMBOO_POST={x:191,top:127,slot:149,base:173,outer:12.5,inner:10.6,slotHalf:10.2};
 // Where S leaves the picture, its water dissolves into tiny 0/1 digits that drift
 // up and fade. Purely decorative: only while S holds water, never under reduced motion.
 const BINARY_SLOTS=16,BINARY_LIFE=2600,BINARY_COLOURS=['#3d9bff','#8f5bff','#c41ddf','#ff4fae','#ff8a18'];
@@ -542,7 +549,7 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
  const tank=(name,value)=>{const ch=name==='W'?g.weekly:g.channel,onRock=name==='W',key=onRock?'weekly':'session',mid=ch.points[Math.floor(ch.points.length/2)];
   return jsxs('g',{'data-bamboo-reservoir':name,'data-reservoir-remaining':value,'data-carved-in':onRock?'rock':'ground','data-drains-from':ch.drainsFrom,children:[
    jsx('path',{d:fluidPath(g[name]),fill:onRock?'#4d4856':'#5c4b3b'}),
-   jsx('g',{clipPath:paint(`tank-${name}`),children:jsx('path',{'data-channel-bed':name,d:fluidPath(g[name].map(p=>[p[0],p[1]+(onRock?2.3:2.1)])),fill:onRock?'#16141b':'#1a1510'})}),
+   jsx('g',{clipPath:paint(`tank-${name}`),children:jsx('path',{'data-channel-bed':name,d:fluidPath(onRock?g.weekly.bed:g[name].map(p=>[p[0],p[1]+2.1])),fill:onRock?'#16141b':'#1a1510'})}),
    liquid(name,frame[name]),
    jsxs('g',{clipPath:paint(`tank-${name}`),children:[
     jsx('g',{clipPath:paint(`${key}-water`),children:jsx('path',{[`data-${key}-current`]:true,d:ch.d,fill:'none',stroke:'#f1e8ff',strokeOpacity:.6,strokeWidth:.8,strokeDasharray:'5 31',strokeLinecap:'round'})}),
@@ -559,7 +566,6 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
   jsx('path',{d:fluidPath(g.S),fill:'none',stroke:'#130e0a',strokeOpacity:.6,strokeWidth:7,strokeLinejoin:'round',filter:paint('soft')}),
   ...g.grass.map(([x,y,s],i)=>moss(x,y+.4,5.6*s,1.9*s,`moss-${i}`)),
   ...g.pebbles.map(([x,y,r],i)=>jsx('ellipse',{cx:x,cy:y,rx:r,ry:r*.66,fill:i%3?'#6d6672':'#8a828f',fillOpacity:.7},`pebble-${i}`)),
-  jsx('ellipse',{'data-contact-shadow':'stand',cx:191.4,cy:165,rx:15,ry:3.4,fill:'#000',fillOpacity:.45,filter:paint('soft')})
  ]});
  const rock=jsxs('g',{'data-rock':'W',children:[
   jsx('ellipse',{'data-contact-shadow':'rock',cx:244,cy:119,rx:62,ry:8,fill:'#000',fillOpacity:.55,filter:paint('soft')}),
@@ -595,7 +601,29 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
   jsx('path',{d:'M-.2 -2.9Q-1 -5.4 -1.9 -6.6M.2 -2.9Q1 -5.4 1.9 -6.6',fill:'none',stroke:'#1c1510',strokeWidth:.35,strokeLinecap:'round'}),
   jsx('circle',{cx:-1.9,cy:-6.6,r:.38,fill:'#1c1510'}),jsx('circle',{cx:1.9,cy:-6.6,r:.38,fill:'#1c1510'})
  ]})},`butterfly-${i}`));
- const lip=g.weekly.lip,mouth=bambooPoint([144.4,98]),from=g.weekly.points[3],feet=163.7,mt=g.mountain;
+ const lip=g.weekly.lip,mouth=bambooPoint([144.4,98]),from=g.weekly.points[3],post=BAMBOO_POST,feet=post.base,mt=g.mountain;
+ // Thick natural bamboo post, its hollow top split by a slot along the rocker:
+ // the back prong and the shoulders sit behind the glass, the front prong and
+ // the peg in front, so the rocker visibly rides inside the fork.
+ const pk=CAMERA_K,{x:px,top:pt,slot:ps,base:pb,outer:R0,inner:R1,slotHalf:sw}=post,xa=Math.sqrt(R0*R0-sw*sw),f=n=>Number(n.toFixed(3));
+ const backPost=jsxs('g',{'data-bamboo-post':'back',children:[
+  jsx('ellipse',{'data-contact-shadow':'stand',cx:px+2,cy:pb+R0*pk*.3,rx:R0*1.5,ry:R0*pk*.75,fill:'#000',fillOpacity:.5,filter:paint('soft')}),
+  jsx('path',{d:`M${f(px-xa)} ${f(pt-sw*pk)}A${R0} ${f(R0*pk)} 0 0 1 ${f(px+xa)} ${f(pt-sw*pk)}L${f(px+xa)} ${f(ps-sw*pk)}L${f(px-xa)} ${f(ps-sw*pk)}Z`,fill:paint('post'),stroke:'#2a2a10',strokeOpacity:.5,strokeWidth:.4}),
+  jsx('path',{d:`M${f(px-Math.sqrt(R1*R1-sw*sw*.81))} ${f(pt-sw*.9*pk)}A${R1} ${f(R1*pk)} 0 0 1 ${f(px+Math.sqrt(R1*R1-sw*sw*.81))} ${f(pt-sw*.9*pk)}L${f(px+Math.sqrt(R1*R1-sw*sw*.81))} ${f(ps-sw*pk)}L${f(px-Math.sqrt(R1*R1-sw*sw*.81))} ${f(ps-sw*pk)}Z`,fill:'#2b2612',fillOpacity:.85}),
+  jsx('ellipse',{'data-post-shoulders':true,cx:px,cy:f(ps+2),rx:R0,ry:f(R0*pk),fill:'#59603a'}),
+  jsx('ellipse',{cx:px,cy:f(ps+2),rx:R1,ry:f(R1*pk),fill:'#1f1b0d'})
+ ]});
+ const frontPost=jsxs('g',{'data-bamboo-post':'front',children:[
+  jsx('path',{'data-post-front-prong':true,d:`M${f(px-xa)} ${f(pt+sw*pk)}A${R0} ${f(R0*pk)} 0 0 0 ${f(px+xa)} ${f(pt+sw*pk)}L${f(px+xa)} ${f(ps+2)}Q${f(px+xa+.5)} ${f(ps+R0*pk+1)} ${f(px+R0)} ${f(ps+R0*pk+2)}L${f(px+R0)} ${f(pb)}A${R0} ${f(R0*pk)} 0 0 1 ${f(px-R0)} ${f(pb)}L${f(px-R0)} ${f(ps+R0*pk+2)}Q${f(px-xa-.5)} ${f(ps+R0*pk+1)} ${f(px-xa)} ${f(ps+2)}Z`,fill:paint('post'),stroke:'#2a2a10',strokeOpacity:.55,strokeWidth:.45,strokeLinejoin:'round'}),
+  jsx('path',{d:`M${f(px-xa)} ${f(pt+sw*pk)}A${R0} ${f(R0*pk)} 0 0 0 ${f(px+xa)} ${f(pt+sw*pk)}A${R1} ${f(R1*pk)} 0 0 1 ${f(px-xa)} ${f(pt+sw*pk)}Z`,fill:paint('post-cut')}),
+  jsx('path',{d:`M${f(px-R0)} ${f(pb-9)}A${R0} ${f(R0*pk)} 0 0 0 ${f(px+R0)} ${f(pb-9)}`,fill:'none',stroke:'#e2d995',strokeOpacity:.55,strokeWidth:1.1}),
+  jsx('path',{d:`M${f(px-R0)} ${f(pb-7.8)}A${R0} ${f(R0*pk)} 0 0 0 ${f(px+R0)} ${f(pb-7.8)}`,fill:'none',stroke:'#2d2c10',strokeOpacity:.5,strokeWidth:.7}),
+  jsx('path',{d:`M${f(px-xa*.45)} ${f(pt+R0*pk+2)}L${f(px-xa*.45)} ${f(pb+R0*pk-3)}`,fill:'none',stroke:'#fff8cf',strokeOpacity:.22,strokeWidth:1.6,strokeLinecap:'round'}),
+  jsx('path',{d:[-.6,-.25,.3,.65].map(t=>`M${f(px+xa*t)} ${f(pt+R0*pk+4)}L${f(px+xa*t)} ${f(pb+R0*pk*Math.sqrt(1-t*t)-2)}`).join(''),fill:'none',stroke:'#20280e',strokeOpacity:.22,strokeWidth:.35}),
+  jsx('path',{d:`M${f(px-xa)} ${f(ps-4)}Q${px} ${f(ps-4+R0*pk*.35)} ${f(px+xa)} ${f(ps-4)}`,fill:'none',stroke:'#d9d29a',strokeOpacity:.5,strokeWidth:.9}),
+  jsx('circle',{'data-bamboo-peg':true,cx:px,cy:f(136+R0*pk),r:2.3,fill:paint('peg'),stroke:'#2a1d0e',strokeWidth:.5}),
+  jsx('circle',{cx:px-.6,cy:f(136+R0*pk-.6),r:.8,fill:'#fff3cf',fillOpacity:.55})
+ ]});
  const sprAngle=Math.atan2(g.weekly.springDirection[1],g.weekly.springDirection[0])*180/Math.PI,spr=g.weekly.spring;
  const backdrop=jsxs('g',{'data-mountain':'backdrop',children:[
   jsx('rect',{x:-10,y:-10,width:320,height:130,fill:paint('sky')}),
@@ -622,7 +650,7 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
  ]});
  const digits=jsx('g',{'data-binary-stream':'S',filter:paint('liquid-glow'),children:Array.from({length:BINARY_SLOTS},(_,i)=>jsx('text',{'data-binary-digit':i,x:0,y:0,textAnchor:'middle',fontFamily:'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',fontWeight:700,fontSize:3.6,fill:'#3d9bff',style:{opacity:0},children:'0'},`digit-${i}`))});
  const decor=[...g.stones.map((s,i)=>({y:s.y,node:stoneNode(s,i)})),...g.grass.map((t,i)=>({y:t[1],node:tuftNode(t,i)}))].sort((a,b)=>a.y-b.y);
- return jsxs('svg',{'data-bamboo-scene':expanded?'expanded':'compact','data-material':'glass-bamboo','data-colour-style':'apple-reference-v10','data-scene':'mountain-i18n-v14','data-camera':'oblique-45','data-bamboo-scale':.44,'data-weekly-shape':'w-watercourse-rock','data-session-shape':'s-watercourse','data-fluid-engine':'gravity-volume-v7',
+ return jsxs('svg',{'data-bamboo-scene':expanded?'expanded':'compact','data-material':'glass-bamboo','data-colour-style':'apple-reference-v10','data-scene':'flat-rock-post-v15','data-camera':'oblique-45','data-bamboo-scale':.44,'data-weekly-shape':'w-watercourse-rock','data-session-shape':'s-watercourse','data-fluid-engine':'gravity-volume-v7',
   'data-flow-from':'W','data-flow-via':'cycle','data-flow-to':'S','data-outlet-position':'bottom','data-source-pipe':'none',
   'data-cycle-state':m.tipped?'dumping':cycle.phase||'unknown','data-cycle-progress':cycle.progress,'data-cycle-reset':cycle.resetMs,'data-physical-angle':frame.angle,
   viewBox:'0 0 300 266',width:expanded?'100%':68,height:expanded?236:20,'aria-hidden':true,style:{display:'block',flexShrink:0,overflow:'hidden'},children:[
@@ -646,6 +674,9 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
     jsxs('linearGradient',{id:uid('liquid'),'data-siri-gradient':true,x1:'0%',y1:'0%',x2:'100%',y2:'65%',children:stops}),
     jsxs('linearGradient',{id:uid('glass-body'),x1:'0%',y1:'0%',x2:'0%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:tint('.95','.03','155'),stopOpacity:.25}),jsx('stop',{offset:'25%',stopColor:tint('.80','.05','160'),stopOpacity:.045}),jsx('stop',{offset:'67%',stopColor:tint('.8','.04','185'),stopOpacity:.025}),jsx('stop',{offset:'100%',stopColor:tint('.75','.06','170'),stopOpacity:.2})]}),
     jsxs('linearGradient',{id:uid('glass-edge'),x1:'0%',y1:'0%',x2:'100%',y2:'90%',children:[jsx('stop',{offset:'0%',stopColor:white,stopOpacity:.55}),jsx('stop',{offset:'35%',stopColor:tint('.8','.07','160'),stopOpacity:.5}),jsx('stop',{offset:'70%',stopColor:white,stopOpacity:.4}),jsx('stop',{offset:'100%',stopColor:tint('.65','.06','175'),stopOpacity:.45})]}),
+    gradient('post',[['0%','#3e4a22'],['28%','#6f7d3c'],['46%','#a9ad6c'],['60%','#86904c'],['100%','#323c1a']],{x2:'100%',y2:'0%'}),
+    gradient('post-cut',[['0%','#e3dcb0'],['100%','#a99f6c']]),
+    jsxs('radialGradient',{id:uid('peg'),cx:'40%',cy:'38%',children:[jsx('stop',{offset:'0%',stopColor:'#c89a5a'}),jsx('stop',{offset:'100%',stopColor:'#6b4720'})]}),
     jsx('clipPath',{id:uid('mountain-clip'),children:jsx('path',{d:fluidPath(g.mountain.near)})}),
     jsxs('filter',{id:uid('grain-dark'),filterUnits:'userSpaceOnUse',x:-20,y:-20,width:340,height:306,children:[
      jsx('feTurbulence',{type:'fractalNoise',baseFrequency:1.1,numOctaves:2,seed:5,result:'noise'}),
@@ -682,7 +713,7 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
    !cycle.artOnly?jsx('text',{'data-weekly-remaining':weeklyLeft,'data-text-state':Number.isFinite(weeklyLeft)?'actual':'unknown',x:76,y:54,textAnchor:'middle',fontFamily:'system-ui',fontSize:16,fontWeight:650,fill:white,stroke:'#0b0a10',strokeOpacity:.7,strokeWidth:3,paintOrder:'stroke',children:Number.isFinite(weeklyLeft)?`${weeklyLeft.toLocaleString('en-US',{maximumFractionDigits:1})}%`:'—'}):null,
    !cycle.artOnly?jsx('text',{x:76,y:71,textAnchor:'middle',fontFamily:'system-ui',fontSize:9.5,fill:muted,children:Number.isFinite(weeklyLeft)?usageText().weeklyLeft:usageText().quotaUnavailable}):null,
    ...decor.filter(d=>d.y<feet).map(d=>d.node),
-   jsx('path',{d:'M185 143L175 199M197 143L209 199',style:{transform:'scale(0.44)',transformOrigin:'191px 136px'},fill:'none',stroke:paint('glass-edge'),strokeWidth:4,strokeLinecap:'round'}),
+   backPost,
    liquid('cycle',frame.bamboo),
    jsxs('g',{'data-bamboo-receiver':'cycle','data-bamboo-mouth':'bevel-upper-shorter','data-tipped':m.tipped,'data-upper-mouth-x':145,'data-lower-mouth-x':113,
     className:'usage-bamboo-receiver',style:{transform:`rotate(${frame.angle}deg) scale(0.44)`,transformOrigin:'191px 136px'},children:[
@@ -698,8 +729,7 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
      jsx('path',{d:'M258 115Q269 136 258 157',fill:'none',stroke:white,strokeOpacity:.6,strokeWidth:1})
    ]},String(cycle.eventId||'idle')),
    frame.bamboo.fraction===null?jsx('text',{'data-bamboo-unknown':'cycle',x:bambooPoint([212,157])[0],y:bambooPoint([212,157])[1],textAnchor:'middle',fontSize:7,fontWeight:650,fill:muted,children:usageText().unknownMark}):null,
-   jsx('circle',{cx:191,cy:136,r:4.2*.44,fill:paint('glass-body'),stroke:paint('glass-edge'),strokeWidth:1}),
-   jsx('circle',{cx:bambooPoint([190.3,135.3])[0],cy:bambooPoint([190.3,135.3])[1],r:1.4*.44,fill:white,fillOpacity:.65}),
+   frontPost,
    jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-inflow':'W','data-bamboo-flow':frame.flowing?'running':'stopped',d:`M${from.join(' ')}L${lip.join(' ')}Q${(lip[0]+mouth[0])/2} ${lip[1]} ${mouth.join(' ')}`,fill:'none',stroke:paint('liquid'),strokeWidth:2.4,strokeLinecap:'round',strokeDasharray:'7 2',className:'usage-bamboo-flow',style:{opacity:frame.flowing?.9:0,animation:`usage-bamboo-flow 1.3s linear infinite, ${rainbow}`}})}),
    ...decor.filter(d=>d.y>=feet).map(d=>d.node),
    jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-pour':'S',d:fluidJetPath(frame.jet),fill:paint('liquid'),style:{opacity:frame.jet.opacity,animation:rainbow}})}),
@@ -848,7 +878,7 @@ function UsageCorner() {
  useEffect(()=>{usageView.set({...source,cycle,selectedAccount,onSelectAccount:id=>setSelectedAccount({provider:rawProvider?.slug,id})})})
  useEffect(()=>()=>usageView.set(null),[])
  useEffect(()=>observeNativeSurfaces(layerNode.current),[])
- useEffect(()=>{try{widgetStorage?.set('floating-art-v1',geometryRef.current);widgetStorage?.set('fluid-engine-v7',true);widgetStorage?.set('proportions-v8',true);widgetStorage?.set('siri-neon-v9',true);widgetStorage?.set('apple-reference-v10',true);widgetStorage?.set('s-watercourse-v11',true);widgetStorage?.set('rock-garden-v12',true);widgetStorage?.set('rock-garden-v13',true);widgetStorage?.set('mountain-i18n-v14',true)}catch{}},[])
+ useEffect(()=>{try{widgetStorage?.set('floating-art-v1',geometryRef.current);widgetStorage?.set('fluid-engine-v7',true);widgetStorage?.set('proportions-v8',true);widgetStorage?.set('siri-neon-v9',true);widgetStorage?.set('apple-reference-v10',true);widgetStorage?.set('s-watercourse-v11',true);widgetStorage?.set('rock-garden-v12',true);widgetStorage?.set('rock-garden-v13',true);widgetStorage?.set('mountain-i18n-v14',true);widgetStorage?.set('flat-rock-post-v15',true)}catch{}},[])
  useEffect(()=>{if(!open)return;const key=e=>{if(e.key==='Escape')setOpen(false)};document.addEventListener('keydown',key);return()=>document.removeEventListener('keydown',key)},[open])
  useEffect(()=>{const fit=()=>{const next=clampFloatingRect(geometryRef.current,floatingViewport());geometryRef.current=next;setGeometry(next)};window.addEventListener('resize',fit);return()=>window.removeEventListener('resize',fit)},[])
  function move(next,persist=false) {
@@ -889,7 +919,7 @@ export default {
   widgetStorage=ctx.storage||null
   // Installs from before the language choice were Arabic-only: keep them Arabic.
   try{let saved=widgetStorage?.get('language',null);if(saved==null&&widgetStorage?.get('floating-art-v1',null)!=null){saved='ar';widgetStorage.set('language','ar')}languageAtom.set(saved||'auto')}catch{}
-  console.info('[usage-meter] mountain-i18n-v14 loaded')
+  console.info('[usage-meter] flat-rock-post-v15 loaded')
   ctx.register({id:'usage-corner-auto-v2',area:'statusBar.left',order:-10000,render:()=>jsx(UsageCorner,{})})
  }
 }
