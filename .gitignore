@@ -1,0 +1,8 @@
+node_modules/
+*.log
+.DS_Store
+._*
+Thumbs.db
+desktop/plugin.backup-*.js
+desktop/.plugin.*.tmp
+graphify-out/

@@ -1,0 +1,11 @@
+{
+  "name": "hermes-usage-meter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A tiny floating Hermes Desktop widget that shows real model quota as a glass bamboo water fountain.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test tests/plugin.test.mjs tests/fluid.physics.test.mjs",
+    "test:browser": "node tests/startup.browser.test.cjs"
+  }
+}
