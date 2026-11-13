@@ -168,6 +168,56 @@ function makeSessionChannel() {
  for(let i=0;i<points.length;i++){const a=points[Math.max(0,i-1)],b=points[Math.min(points.length-1,i+1)],dx=b[0]-a[0],dy=b[1]-a[1],length=Math.hypot(dx,dy)||1,nx=-dy/length*half,ny=dx/length*half;left.push([points[i][0]+nx,points[i][1]+ny]);right.push([points[i][0]-nx,points[i][1]-ny])}
  return {points,polygon:[...left,...right.reverse()],inlet:[158,151],end:[120,242],width:12,d:'M169 151C145 151 117 160 117 184C117 201 158 198 158 215C158 233 139 242 120 242'};
 }
+// Closed outline of a thick polyline: miter on the inner side of every bend,
+// bevel on the outer side, so the channel never self-intersects.
+function strokeOutline(points,half) {
+ const dir=i=>{const a=points[i],b=points[i+1],dx=b[0]-a[0],dy=b[1]-a[1],l=Math.hypot(dx,dy);return[dx/l,dy/l]},normal=d=>[-d[1],d[0]];
+ const left=[],right=[],last=points.length-1;
+ for(let i=0;i<=last;i++){
+  const p=points[i];
+  if(i===0||i===last){const n=normal(dir(i===0?0:last-1));left.push([p[0]+n[0]*half,p[1]+n[1]*half]);right.push([p[0]-n[0]*half,p[1]-n[1]*half]);continue}
+  const d0=dir(i-1),d1=dir(i),n0=normal(d0),n1=normal(d1),side=Math.sign(d1[0]*n0[0]+d1[1]*n0[1])||1;
+  const mx=n0[0]+n1[0],my=n0[1]+n1[1],ml=Math.hypot(mx,my),cos=(mx*n0[0]+my*n0[1])/ml,miter=[mx/ml*half/cos,my/ml*half/cos];
+  const inner=[p[0]+side*miter[0],p[1]+side*miter[1]],outer=[[p[0]-side*n0[0]*half,p[1]-side*n0[1]*half],[p[0]-side*n1[0]*half,p[1]-side*n1[1]*half]];
+  if(side>0){left.push(inner);right.push(...outer)}else{right.push(inner);left.push(...outer)}
+ }
+ return [...left,...right.reverse()]
+}
+// W is a watercourse carved into a rock that stands above the bamboo. Its
+// top-left end is the lip the water leaves from, straight above the bamboo mouth.
+function makeWeeklyChannel() {
+ const points=[[175,40],[201,94],[226,62],[251,94],[277,40]],half=5.5,polygon=strokeOutline(points,half);
+ const a=points[0],b=points[1],l=Math.hypot(b[0]-a[0],b[1]-a[1]),n=[-(b[1]-a[1])/l,(b[0]-a[0])/l];
+ const lip=[a[0]+n[0]*half,a[1]+n[1]*half],spring=[a[0]+(b[0]-a[0])/l*2,a[1]+(b[1]-a[1])/l*2];
+ // The rock's lower-left face hugs the W's outer wall, so the falling water stays outside the stone.
+ const face=[0,1].map(i=>{const q=i?polygon[1]:lip;return[q[0]+n[0]*.8,q[1]+n[1]*.8]});
+ const rock=[face[0],[170.5,36.5],[178,30],[190,22],[212,13],[238,9],[264,13],[285,24],[294,40],[297,66],[293,96],[296,132],[292,172],[297,214],[294,251],[268,254],[241,252],[236,222],[241,190],[234,156],[240,128],[236,110],[222,104],[206.5,101],[198,100.4],face[1]];
+ return {points,polygon,lip,spring,rock,half}
+}
+const SCENE_GRASS=[[104,193,1.3],[152,189,1.15],[128,233,1.1],[172,239,1.2],[103,251,1.1],[206,167,1],[230,251,1.35],[252,252,1],[214,14,.7],[87,214,1]];
+const SCENE_STONES=[[95,201,6,4.2],[178,229,4.6,3.2],[107,256,5.2,3],[147,254,4.2,2.6],[186,166.5,5,2.4],[199,166.5,4.6,2.2],[221,256,6,3.4],[163,250,3.4,2.2]];
+const BUTTERFLY_PERIOD=30000,BUTTERFLY_VISIT=11000;
+function sceneHash(n) {const x=Math.sin(n*127.1+17.3)*43758.5453;return x-Math.floor(x)}
+// Every 30 s one or two butterflies arrive, rest on a grass tuft and leave.
+function butterflyFlight(time,index) {
+ if(!Number.isFinite(time)||time<0)return null;
+ const cycle=Math.floor(time/BUTTERFLY_PERIOD),count=sceneHash(cycle*3.7)>.5?2:1;if(index>=count)return null;
+ const local=time-cycle*BUTTERFLY_PERIOD-index*1900;if(local<0||local>BUTTERFLY_VISIT)return null;
+ const h=k=>sceneHash(cycle*13.1+index*5.3+k),u=local/BUTTERFLY_VISIT,ease=n=>n*n*(3-2*n),lerp=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
+ const tuft=SCENE_GRASS[Math.floor(h(1)*SCENE_GRASS.length)],rest=[tuft[0]+(h(2)-.5)*6,tuft[1]-13*tuft[2]-2];
+ const fromLeft=h(3)<.5,entry=[fromLeft?-14:314,120+h(4)*90],exit=[fromLeft?314:-14,30+h(5)*70];
+ const hover=[rest[0]+3.5*Math.sin(local*.0021),rest[1]+1.6*Math.sin(local*.0034)];
+ const at=u<.33?lerp(entry,rest,ease(u/.33)):u<.68?hover:lerp(hover,exit,ease((u-.68)/.32));
+ const perched=u>=.4&&u<.62,flapRate=perched?.008:.03,y=at[1]+(perched?0:2.2*Math.sin(local*.009));
+ const prev=u<.33?lerp(entry,rest,ease(Math.max(0,u-.01)/.33)):u<.68?rest:lerp(hover,exit,ease(Math.max(0,u-.69)/.32));
+ const facing=Math.abs(at[0]-prev[0])>.01?Math.sign(at[0]-prev[0]):fromLeft?1:-1;
+ return {x:at[0],y,flap:.22+.78*Math.abs(Math.sin(local*flapRate)),facing,opacity:Math.min(1,u/.05,(1-u)/.05),perched,hue:Math.floor(h(6)*2)}
+}
+// Displayed quota glides toward each new provider value instead of jumping.
+function easeShownQuota(shown,target,dt,reduced=false) {
+ if(reduced||typeof target!=='number'||!Number.isFinite(target)||typeof shown!=='number'||!Number.isFinite(shown))return target;
+ const next=shown+(target-shown)*(1-Math.exp(-Math.max(0,dt)/1100));return Math.abs(target-next)<.02?target:next
+}
 function sessionSurfaceSpan(polygon,y) {
  const xs=[];for(let i=0;i<polygon.length;i++){const a=polygon[i],b=polygon[(i+1)%polygon.length];if((a[1]>y)!==(b[1]>y))xs.push(a[0]+(y-a[1])*(b[0]-a[0])/(b[1]-a[1]))}xs.sort((a,b)=>a-b);
  let span=[160,172];for(let i=0;i+1<xs.length;i+=2)if(i===0||xs[i+1]-xs[i]>span[1]-span[0])span=[xs[i],xs[i+1]];return span;
@@ -178,10 +228,10 @@ function rotateFluidPoint(p,angle) {
 }
 function fluidGeometry() {return FLUID_GEOMETRY}
 const FLUID_GEOMETRY=(()=>{
- const W=[[124,23],[137,23],[146,65],[157,35],[168,65],[177,23],[190,23],[176,84],[164,84],[157,62],[150,84],[138,84]].map(p=>[172+(p[0]-144)*1.4,100+(p[1]-84)*1.4]);
+ const weekly=makeWeeklyChannel(),W=weekly.polygon;
  const channel=makeSessionChannel(),S=channel.polygon;
  const bamboo=[[148,120],[254,120],[254,152],[119,152]].map(bambooPoint),rest=bamboo.map(p=>rotateFluidPoint(p,45));
- return {W,S,channel,bamboo,capacity:polygonArea(polygonBelow(rest,rotateFluidPoint(bambooPoint([113,158]),45)[1]))}
+ return {W,S,channel,weekly,rock:weekly.rock,grass:SCENE_GRASS,stones:SCENE_STONES,bamboo,capacity:polygonArea(polygonBelow(rest,rotateFluidPoint(bambooPoint([113,158]),45)[1]))}
 })();
 function fluidPath(p) {return p.length?'M'+p.map(a=>a.map(n=>Number(n.toFixed(3))).join(' ')).join('L')+'Z':''}
 function dumpFluidState(u) {
@@ -259,6 +309,11 @@ function applyFluidFrame(svg,frame) {
  const internal=svg.querySelector('[data-fluid-internal]');if(internal)internal.style.opacity=String(frame.jet.opacity*.65);
  const inlet=svg.querySelector('[data-bamboo-inflow]');if(inlet){inlet.style.opacity=frame.flowing?'.9':'0';inlet.setAttribute('data-bamboo-flow',frame.flowing?'running':'stopped')}
  const splash=svg.querySelector('[data-fluid-splash]');if(splash){const y=frame.S.level,[a,b]=sessionSurfaceSpan(frame.S.polygon,y),cx=(a+b)/2;splash.setAttribute('d',`M${a} ${y}Q${cx} ${y-3.6*frame.jet.opacity} ${b} ${y}`);splash.style.opacity=String(frame.jet.opacity*.7)}
+ for(const node of svg.querySelectorAll('[data-butterfly]')){
+  const b=frame.motion?butterflyFlight(frame.time,Number(node.getAttribute('data-butterfly'))):null;
+  node.setAttribute('data-butterfly-state',b?(b.perched?'resting':'flying'):'away');node.style.opacity=b?String(Number(b.opacity.toFixed(3))):'0';
+  if(b){node.setAttribute('transform',`translate(${round(b.x)} ${round(b.y)}) scale(${b.facing*1.35} 1.35)`);const wings=node.querySelector('[data-butterfly-wings]');if(wings)wings.setAttribute('transform',`scale(${round(b.flap)} 1)`)}
+ }
  svg.setAttribute('data-physical-angle',round(frame.angle));svg.setAttribute('data-fluid-motion',frame.motion?'waves':'reduced');
 }
 function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:null,dumping:false}) {
@@ -273,13 +328,31 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
   jsx('path',{'data-fluid-liquid':name,'data-bamboo-level':name==='cycle'?'cycle':undefined,'data-visual-fraction':data.fraction===null?'unknown':data.fraction,'data-liquid-volume':data.volume??'unknown','data-liquid-level':data.level,d:wave.fill,fill:paint('liquid'),style:{opacity:data.fraction===null||data.fraction<=0?0:1}}),
   jsx('path',{'data-fluid-surface':name,d:wave.surface,fill:'none',stroke:paint('liquid'),strokeOpacity:.9,strokeWidth:.45,vectorEffect:'non-scaling-stroke',style:{opacity:data.fraction===null||data.fraction<=0?0:.85}})
  ]})})};
- const tank=(name,value)=>jsxs('g',{'data-bamboo-reservoir':name,'data-reservoir-remaining':value,children:[
-  jsx('path',{d:fluidPath(g[name]),fill:paint('glass-body'),stroke:paint('glass-edge'),strokeWidth:1.3}),liquid(name,frame[name]),
+ // Both reservoirs are carved beds: W in the rock face, S in the ground.
+ const tank=(name,value)=>jsxs('g',{'data-bamboo-reservoir':name,'data-reservoir-remaining':value,'data-carved-in':name==='W'?'rock':'ground',children:[
+  jsx('path',{d:fluidPath(g[name]),fill:name==='W'?'#0a0812':'#0c0a10',fillOpacity:.92,stroke:'#000',strokeOpacity:.35,strokeWidth:1.3}),liquid(name,frame[name]),
   name==='S'?jsxs('g',{clipPath:paint('tank-S'),children:[jsx('g',{clipPath:paint('session-water'),children:jsx('path',{'data-session-current':true,d:g.channel.d,fill:'none',stroke:'#b176ff',strokeOpacity:.7,strokeWidth:1.1,strokeDasharray:'6 30',strokeLinecap:'round'})}),jsx('path',{'data-fluid-internal':'S','data-session-channel':true,d:g.channel.d,fill:'none',stroke:paint('liquid'),strokeWidth:2.2,strokeLinecap:'round',style:{opacity:frame.jet.opacity*.65,animation:rainbow}}),jsx('path',{'data-fluid-splash':'S',fill:'none',stroke:white,strokeWidth:.8,style:{opacity:0}})]}):null,
-  jsx('path',{d:fluidPath(g[name]),fill:'none',stroke:name==='S'?'#9c7bff':paint('glass-edge'),strokeOpacity:name==='S'?.8:1,strokeWidth:name==='S'?.55:.45,vectorEffect:'non-scaling-stroke'}),
-  value===null?jsx('text',{x:name==='W'?172+(157-144)*1.4:154,y:name==='W'?100+(58-84)*1.4:226,textAnchor:'middle',fontFamily:'system-ui',fontSize:name==='W'?21:15*.9,fontWeight:650,fill:muted,children:'؟'}):null
+  jsx('path',{d:fluidPath(g[name]),fill:'none',stroke:name==='W'?'#b6a8e0':'#a596c8',strokeOpacity:name==='W'?.6:.7,strokeWidth:.55,vectorEffect:'non-scaling-stroke'}),
+  value===null?jsx('text',{x:name==='W'?226:154,y:name==='W'?52:226,textAnchor:'middle',fontFamily:'system-ui',fontSize:name==='W'?21:15*.9,fontWeight:650,fill:muted,children:'؟'}):null
  ]});
- return jsxs('svg',{'data-bamboo-scene':expanded?'expanded':'compact','data-material':'glass-bamboo','data-colour-style':'apple-reference-v10','data-bamboo-scale':.44,'data-weekly-scale':1.4,'data-session-shape':'s-watercourse','data-fluid-engine':'gravity-volume-v7',
+ const rock=jsxs('g',{'data-rock':'W',children:[
+  jsx('path',{'data-rock-body':true,d:fluidPath(g.rock),fill:paint('rock'),stroke:'#8e83b4',strokeOpacity:.45,strokeWidth:.6,strokeLinejoin:'round',vectorEffect:'non-scaling-stroke'}),
+  jsx('path',{d:'M180 29Q214 10 264 14Q284 22 292 38',fill:'none',stroke:white,strokeOpacity:.16,strokeWidth:2.2,strokeLinecap:'round'}),
+  jsx('path',{d:'M262 118l-7 13 4 10M268 176l7 11-4 12M249 222l8 9M214 26l-9 5M286 70l-6 8',fill:'none',stroke:'#07060b',strokeOpacity:.55,strokeWidth:.9,strokeLinecap:'round',strokeLinejoin:'round'}),
+  jsx('path',{d:'M244 130q8 -4 14 2M240 196q7 -3 12 3',fill:'none',stroke:'#c9bdf0',strokeOpacity:.12,strokeWidth:1.2,strokeLinecap:'round'})
+ ]});
+ const stones=SCENE_STONES.map(([x,y,rx,ry],i)=>jsxs('g',{'data-stone':i,children:[jsx('ellipse',{cx:x,cy:y,rx,ry,fill:paint('stone'),stroke:'#000',strokeOpacity:.3,strokeWidth:.4}),jsx('ellipse',{cx:x-rx*.25,cy:y-ry*.4,rx:rx*.45,ry:ry*.28,fill:white,fillOpacity:.13})]},`stone-${i}`));
+ const grass=SCENE_GRASS.map(([x,y,s],i)=>jsx('g',{'data-grass':i,className:'usage-grass',style:{transformBox:'fill-box',transformOrigin:'50% 100%',animation:`usage-grass-sway ${(3.1+(i%4)*.55).toFixed(2)}s ease-in-out ${(-i*.83).toFixed(2)}s infinite alternate`},
+  children:[[-4.2,10,-.8],[-1.6,14,.3],[1,12.5,1.4],[3.6,9,2.6],[-2.8,7.5,-2]].map(([dx,h,lean],k)=>jsx('path',{d:`M${x+dx*s-.7*s} ${y}Q${x+dx*s+lean*.4*s} ${y-h*.55*s} ${x+dx*s+lean*s} ${y-h*s}Q${x+dx*s+lean*.4*s+.9*s} ${y-h*.5*s} ${x+dx*s+.7*s} ${y}Z`,fill:paint(k%2?'grass-b':'grass-a')},`blade-${k}`))},`grass-${i}`));
+ const butterflies=[0,1].map(i=>jsx('g',{'data-butterfly':i,'data-butterfly-state':'away',style:{opacity:0},children:jsxs('g',{children:[
+  jsxs('g',{'data-butterfly-wings':true,children:[
+   jsx('path',{d:'M0 0C-3 -7 -9 -7 -8.5 -2.5C-8 0.5 -3 1 0 0ZM0 0C-2.5 1.5 -6.5 5 -4.5 6.5C-2.5 7.5 -0.5 3 0 0Z',fill:paint(i?'wing-b':'wing-a'),fillOpacity:.95}),
+   jsx('path',{d:'M0 0C3 -7 9 -7 8.5 -2.5C8 0.5 3 1 0 0ZM0 0C2.5 1.5 6.5 5 4.5 6.5C2.5 7.5 0.5 3 0 0Z',fill:paint(i?'wing-b':'wing-a'),fillOpacity:.95})
+  ]}),
+  jsx('path',{d:'M0 -3.5L0 4.5M0 -3.5Q-1 -6 -2.2 -6.8M0 -3.5Q1 -6 2.2 -6.8',fill:'none',stroke:'#1a1426',strokeWidth:1,strokeLinecap:'round'})
+ ]})},`butterfly-${i}`));
+ const lip=g.weekly.lip,spring=g.weekly.spring,mouth=bambooPoint([144.4,98]);
+ return jsxs('svg',{'data-bamboo-scene':expanded?'expanded':'compact','data-material':'glass-bamboo','data-colour-style':'apple-reference-v10','data-scene':'rock-garden-v12','data-bamboo-scale':.44,'data-weekly-shape':'w-watercourse-rock','data-session-shape':'s-watercourse','data-fluid-engine':'gravity-volume-v7',
   'data-flow-from':'W','data-flow-via':'cycle','data-flow-to':'S','data-outlet-position':'bottom','data-source-pipe':'none',
   'data-cycle-state':m.tipped?'dumping':cycle.phase||'unknown','data-cycle-progress':cycle.progress,'data-cycle-reset':cycle.resetMs,'data-physical-angle':frame.angle,
   viewBox:'0 0 300 266',width:expanded?'100%':68,height:expanded?236:20,'aria-hidden':true,style:{display:'block',flexShrink:0,overflow:'hidden'},children:[
@@ -292,13 +365,23 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
     jsxs('linearGradient',{id:uid('liquid'),'data-siri-gradient':true,x1:'0%',y1:'0%',x2:'100%',y2:'65%',children:stops}),
     jsxs('linearGradient',{id:uid('glass-body'),x1:'0%',y1:'0%',x2:'0%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:tint('.95','.03','155'),stopOpacity:.25}),jsx('stop',{offset:'25%',stopColor:tint('.80','.05','160'),stopOpacity:.045}),jsx('stop',{offset:'67%',stopColor:tint('.8','.04','185'),stopOpacity:.025}),jsx('stop',{offset:'100%',stopColor:tint('.75','.06','170'),stopOpacity:.2})]}),
     jsxs('linearGradient',{id:uid('glass-edge'),x1:'0%',y1:'0%',x2:'100%',y2:'90%',children:[jsx('stop',{offset:'0%',stopColor:white,stopOpacity:.55}),jsx('stop',{offset:'35%',stopColor:tint('.8','.07','160'),stopOpacity:.5}),jsx('stop',{offset:'70%',stopColor:white,stopOpacity:.4}),jsx('stop',{offset:'100%',stopColor:tint('.65','.06','175'),stopOpacity:.45})]}),
+    jsxs('linearGradient',{id:uid('rock'),x1:'20%',y1:'0%',x2:'70%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:'#4b4466'}),jsx('stop',{offset:'45%',stopColor:'#2a2540'}),jsx('stop',{offset:'100%',stopColor:'#16131f'})]}),
+    jsxs('radialGradient',{id:uid('ground'),children:[jsx('stop',{offset:'0%',stopColor:'#6b5f8f',stopOpacity:.32}),jsx('stop',{offset:'100%',stopColor:'#6b5f8f',stopOpacity:0})]}),
+    jsxs('linearGradient',{id:uid('stone'),x1:'0%',y1:'0%',x2:'0%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:'#7b7396'}),jsx('stop',{offset:'100%',stopColor:'#2e2a3c'})]}),
+    jsxs('linearGradient',{id:uid('grass-a'),x1:'0%',y1:'100%',x2:'0%',y2:'0%',children:[jsx('stop',{offset:'0%',stopColor:'#14653f'}),jsx('stop',{offset:'100%',stopColor:'#5fe08f'})]}),
+    jsxs('linearGradient',{id:uid('grass-b'),x1:'0%',y1:'100%',x2:'0%',y2:'0%',children:[jsx('stop',{offset:'0%',stopColor:'#0f5537'}),jsx('stop',{offset:'100%',stopColor:'#a6ef7c'})]}),
+    jsxs('linearGradient',{id:uid('wing-a'),x1:'0%',y1:'0%',x2:'100%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:'#ff4fae'}),jsx('stop',{offset:'100%',stopColor:'#ff8a18'})]}),
+    jsxs('linearGradient',{id:uid('wing-b'),x1:'0%',y1:'0%',x2:'100%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:'#45e5ff'}),jsx('stop',{offset:'100%',stopColor:'#a16bff'})]}),
     ...['W','S'].map(name=>jsx('clipPath',{id:uid(`tank-${name}`),children:jsx('path',{d:fluidPath(g[name])})},`clip-${name}`)),
     jsx('clipPath',{id:uid('session-water'),children:jsx('path',{'data-session-flow-clip':true,d:liquidWave(frame.S,frame.time).fill})}),
     jsx('clipPath',{id:uid('cavity'),children:jsx('polygon',{'data-fluid-cavity':true,points:frame.bamboo.polygon.map(p=>p.join(',')).join(' ')})})
    ]}),
+   rock,
    tank('W',weeklyLeft),
    !cycle.artOnly?jsx('text',{'data-weekly-remaining':weeklyLeft,'data-text-state':Number.isFinite(weeklyLeft)?'actual':'unknown',x:76,y:54,textAnchor:'middle',fontFamily:'system-ui',fontSize:16,fontWeight:650,fill:white,children:Number.isFinite(weeklyLeft)?`${weeklyLeft.toLocaleString('en-US',{maximumFractionDigits:1})}%`:'—'}):null,
    !cycle.artOnly?jsx('text',{x:76,y:71,textAnchor:'middle',fontFamily:'system-ui',fontSize:9.5,fill:muted,children:Number.isFinite(weeklyLeft)?'متبقٍ أسبوعيًا':'الحصة غير متاحة'}):null,
+   jsx('ellipse',{'data-ground':true,cx:192,cy:257,rx:118,ry:6.5,fill:paint('ground')}),
+   ...stones,
    jsx('path',{d:'M185 143L175 199M197 143L209 199',style:{transform:'scale(0.44)',transformOrigin:'191px 136px'},fill:'none',stroke:paint('glass-edge'),strokeWidth:4,strokeLinecap:'round'}),
    liquid('cycle',frame.bamboo),
    jsxs('g',{'data-bamboo-receiver':'cycle','data-bamboo-mouth':'bevel-upper-shorter','data-tipped':m.tipped,'data-upper-mouth-x':145,'data-lower-mouth-x':113,
@@ -317,9 +400,11 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
    frame.bamboo.fraction===null?jsx('text',{'data-bamboo-unknown':'cycle',x:bambooPoint([212,157])[0],y:bambooPoint([212,157])[1],textAnchor:'middle',fontSize:7,fontWeight:650,fill:muted,children:'؟'}):null,
    jsx('circle',{cx:191,cy:136,r:4.2*.44,fill:paint('glass-body'),stroke:paint('glass-edge'),strokeWidth:1}),
    jsx('circle',{cx:bambooPoint([190.3,135.3])[0],cy:bambooPoint([190.3,135.3])[1],r:1.4*.44,fill:white,fillOpacity:.65}),
-   jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-inflow':'W','data-bamboo-flow':frame.flowing?'running':'stopped',d:`M172 100Q172 109 ${bambooPoint([144.4,98]).join(' ')}`,fill:'none',stroke:paint('liquid'),strokeWidth:2.4,strokeLinecap:'round',strokeDasharray:'7 2',className:'usage-bamboo-flow',style:{opacity:frame.flowing?.9:0,animation:`usage-bamboo-flow 1.3s linear infinite, ${rainbow}`}})}),
+   jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-inflow':'W','data-bamboo-flow':frame.flowing?'running':'stopped',d:`M${spring.join(' ')}Q${lip[0]-.6} ${lip[1]-.4} ${lip[0]-.5} ${lip[1]+3}C${lip[0]-.5} ${lip[1]+30} ${mouth[0]} ${mouth[1]-30} ${mouth.join(' ')}`,fill:'none',stroke:paint('liquid'),strokeWidth:2.4,strokeLinecap:'round',strokeDasharray:'7 2',className:'usage-bamboo-flow',style:{opacity:frame.flowing?.9:0,animation:`usage-bamboo-flow 1.3s linear infinite, ${rainbow}`}})}),
    tank('S',sessionLeft),
-   jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-pour':'S',d:fluidJetPath(frame.jet),fill:paint('liquid'),style:{opacity:frame.jet.opacity,animation:rainbow}})})
+   ...grass,
+   jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-pour':'S',d:fluidJetPath(frame.jet),fill:paint('liquid'),style:{opacity:frame.jet.opacity,animation:rainbow}})}),
+   ...butterflies
   ]})
 }
 function startFluidPhysics(svg,read) {
@@ -327,7 +412,9 @@ function startFluidPhysics(svg,read) {
  const media=window.matchMedia('(prefers-reduced-motion: reduce)');let raf=0,disposed=false,gain=1;
  const resize=()=>{const box=svg.getBoundingClientRect(),scale=Math.min(box.width/300,box.height/266);gain=scale>0?Math.min(2.8,Math.max(1,.55/scale)):1};resize();
  const observer=typeof ResizeObserver!=='undefined'?new ResizeObserver(resize):null;observer?.observe(svg);
- const step=()=>{if(disposed)return;const {session,weekly,cycle}=read(),frame=fluidFrame(session,weekly,cycle,document.timeline?.currentTime||0,Date.now(),media.matches);frame.motion*=gain;applyFluidFrame(svg,frame);if(!media.matches)raf=requestAnimationFrame(step)};
+ const step=()=>{if(disposed)return;const {session,weekly,cycle}=read(),now=document.timeline?.currentTime||0,memory=svg.__usageShown||{},dt=now-(memory.time??now);
+  const shown={session:cycle?.dumping?session:easeShownQuota(memory.session,session,dt,media.matches),weekly:easeShownQuota(memory.weekly,weekly,dt,media.matches),time:now};svg.__usageShown=shown;
+  const frame=fluidFrame(shown.session,shown.weekly,cycle,now,Date.now(),media.matches);frame.motion*=gain;applyFluidFrame(svg,frame);if(!media.matches)raf=requestAnimationFrame(step)};
  const change=()=>{cancelAnimationFrame(raf);step()};media.addEventListener?.('change',change);step();
  return()=>{disposed=true;cancelAnimationFrame(raf);observer?.disconnect();media.removeEventListener?.('change',change)}
 }
@@ -455,7 +542,7 @@ function UsageCorner() {
  useEffect(()=>{usageView.set({...source,cycle,selectedAccount,onSelectAccount:id=>setSelectedAccount({provider:rawProvider?.slug,id})})})
  useEffect(()=>()=>usageView.set(null),[])
  useEffect(()=>observeNativeSurfaces(layerNode.current),[])
- useEffect(()=>{try{widgetStorage?.set('floating-art-v1',geometryRef.current);widgetStorage?.set('fluid-engine-v7',true);widgetStorage?.set('proportions-v8',true);widgetStorage?.set('siri-neon-v9',true);widgetStorage?.set('apple-reference-v10',true);widgetStorage?.set('s-watercourse-v11',true)}catch{}},[])
+ useEffect(()=>{try{widgetStorage?.set('floating-art-v1',geometryRef.current);widgetStorage?.set('fluid-engine-v7',true);widgetStorage?.set('proportions-v8',true);widgetStorage?.set('siri-neon-v9',true);widgetStorage?.set('apple-reference-v10',true);widgetStorage?.set('s-watercourse-v11',true);widgetStorage?.set('rock-garden-v12',true)}catch{}},[])
  useEffect(()=>{if(!open)return;const key=e=>{if(e.key==='Escape')setOpen(false)};document.addEventListener('keydown',key);return()=>document.removeEventListener('keydown',key)},[open])
  useEffect(()=>{const fit=()=>{const next=clampFloatingRect(geometryRef.current,floatingViewport());geometryRef.current=next;setGeometry(next)};window.addEventListener('resize',fit);return()=>window.removeEventListener('resize',fit)},[])
  function move(next,persist=false) {
@@ -487,14 +574,14 @@ function UsageCorner() {
    jsx('div',{style:{width:'100%',height:'100%',pointerEvents:'none'},children:jsx(FountainView,{provider,cycle,model:data?.model||liveModel||'',dock:true,artOnly:true})}),
    jsx('div',{'data-usage-resize':true,role:'slider',tabIndex:0,'aria-label':'تغيير حجم الرسمة',onKeyDown:event=>{if(event.key==='ArrowRight'||event.key==='ArrowUp'){event.preventDefault();move({...geometryRef.current,width:geometryRef.current.width+8,height:geometryRef.current.height+8},true)}if(event.key==='ArrowLeft'||event.key==='ArrowDown'){event.preventDefault();move({...geometryRef.current,width:geometryRef.current.width-8,height:geometryRef.current.height-8},true)}},style:{position:'absolute',right:0,bottom:0,width:14,height:14,cursor:'nwse-resize',opacity:hover?1:0,transition:'opacity 150ms'},children:jsx('span',{style:{position:'absolute',right:2,bottom:2,width:7,height:7,borderRight:'1.5px solid var(--ui-text-secondary)',borderBottom:'1.5px solid var(--ui-text-secondary)',borderRadius:1,pointerEvents:'none'}})}),
    open?jsx('div',{id:'usage-meter-details',role:'region','aria-label':'تفاصيل استهلاك الموديل والرصيد',onPointerDown:event=>event.stopPropagation(),onDoubleClick:event=>event.stopPropagation(),style:{position:'fixed',zIndex:10,left:Math.max(12,Math.min(geometry.x,floatingViewport().width-352)),...popupPlacement,width:'min(340px,calc(100vw - 24px))',maxHeight:Math.max(120,Math.min(640,geometry.y>280?geometry.y-20:floatingViewport().height-geometry.y-geometry.height-28)),overflow:'auto',cursor:'auto',border:'1px solid var(--ui-stroke-secondary)',borderRadius:14,background:'var(--ui-bg-elevated)'},children:jsxs('div',{children:[jsx('button',{'aria-label':'إغلاق التفاصيل',onClick:()=>setOpen(false),style:{position:'absolute',left:8,top:8,border:0,background:'transparent',color:'var(--ui-text-primary)',cursor:'pointer'},children:'×'}),jsx(UsagePane,{})]})}):null,
-   jsx('style',{children:'@keyframes usage-bamboo-flow{to{stroke-dashoffset:-28}}@keyframes usage-liquid-color{0%,100%{filter:brightness(.98) saturate(1.25)}50%{filter:brightness(1.04) saturate(1.3)}}@media(prefers-reduced-motion:reduce){[data-bamboo-scene] *{animation:none!important;transition:none!important}[data-usage-resize]{transition:none!important}}'})
+   jsx('style',{children:'@keyframes usage-bamboo-flow{to{stroke-dashoffset:-28}}@keyframes usage-grass-sway{0%{transform:rotate(-3.5deg)}100%{transform:rotate(4deg)}}@keyframes usage-liquid-color{0%,100%{filter:brightness(.98) saturate(1.25)}50%{filter:brightness(1.04) saturate(1.3)}}@media(prefers-reduced-motion:reduce){[data-bamboo-scene] *{animation:none!important;transition:none!important}[data-usage-resize]{transition:none!important}}'})
   ]})
 }
 export default {
  id:'usage-meter',name:'استهلاك الموديل والرصيد',
  register(ctx) {
   widgetStorage=ctx.storage||null
-  console.info('[usage-meter] s-watercourse-v11 loaded')
+  console.info('[usage-meter] rock-garden-v12 loaded')
   ctx.register({id:'usage-corner-auto-v2',area:'statusBar.left',order:-10000,render:()=>jsx(UsageCorner,{})})
  }
 }

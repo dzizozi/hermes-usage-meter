@@ -2,18 +2,23 @@
 
 A tiny floating widget for **[Hermes Agent](https://github.com/NousResearch/hermes-agent) Desktop**
 (Windows, macOS and Linux) that shows your model's real subscription quota as a living
-Japanese water fountain (*shishi-odoshi*).
+Japanese rock garden fountain (*shishi-odoshi*).
 
-![Usage meter preview](docs/s-watercourse-v11-preview.png)
+![Usage meter preview](docs/rock-garden-preview.png)
+
+[Animated demo](docs/rock-garden-demo.gif): butterflies visit, grass sways, and S descends gradually as you use your quota.
 
 | Part | Meaning |
 |---|---|
-| **W** reservoir | Remaining **weekly** quota |
+| **W** watercourse, carved in the rock | Remaining **weekly** quota. Water leaves from its top-left end into the bamboo |
 | Glass bamboo | Time until the 5-hour session window resets, from the provider's real `resets_at` |
-| **S** watercourse | Remaining **session / 5-hour** quota |
+| **S** watercourse, in the ground | Remaining **session / 5-hour** quota. The level glides down gradually as you use it |
 
 When the provider confirms a renewal, the bamboo tips and pours once into S, which fills up
 to the new real balance.
+
+Stones and wind-swayed grass line the S stream, and every 30 seconds one or two butterflies
+come to rest on the grass and fly away.
 
 ## Honest data, no guesses
 
@@ -66,7 +71,7 @@ To uninstall, delete that folder (or disable the plugin on the Plugins page).
   tokens, every quota window and its reset time. Esc closes them.
 - The widget lives in Hermes' base layer: previews, menus and dialogs always cover it, and it
   stays out of the way of their clicks.
-- `prefers-reduced-motion` freezes all waves and animations.
+- `prefers-reduced-motion` freezes all waves, grass and butterflies.
 
 The interface text is currently in Arabic.
 
@@ -76,8 +81,8 @@ The tests reuse the dev dependencies already present in a Hermes Agent checkout
 (esbuild, React, React Query, Playwright). Nothing is installed.
 
 ```sh
-npm test               # 36 unit and fluid-physics tests (Node 20+)
-npm run test:browser   # 32 real-browser scenarios with React + React Query
+npm test               # 39 unit and fluid-physics tests (Node 20+)
+npm run test:browser   # 33 real-browser scenarios with React + React Query
 ```
 
 `HERMES_AGENT_DIR` points the browser test at a specific checkout. It tries Playwright's
@@ -88,11 +93,11 @@ Chromium, then Edge, then Chrome. All network data in the browser test is synthe
 ## بالعربية
 
 ويدجيت صغيرة عائمة لتطبيق **Hermes Agent Desktop** على ويندوز وماك ولينكس. تعرض حصة
-الاشتراك الحقيقية على شكل نافورة خيزران يابانية:
+الاشتراك الحقيقية على شكل حديقة صخرية يابانية بنافورة خيزران:
 
-- **W:** الحصة الأسبوعية المتبقية.
+- **W:** مجرى محفور في صخرة، يمثل الحصة الأسبوعية المتبقية، ويصب من طرفه الأيسر العلوي في القصبة.
 - **القصبة الزجاجية:** الوقت المتبقي حتى تجدد نافذة الخمس ساعات، حسب موعد المزوّد الفعلي.
-- **مجرى S:** حصة الجلسة (5 ساعات) المتبقية.
+- **مجرى S:** مجرى في الأرض يمثل حصة الجلسة (5 ساعات)، وينخفض ماؤه تدريجيًا مع الاستخدام. حوله أحجار وحشائش تتمايل، وتزوره فراشة أو اثنتان كل 30 ثانية.
 
 عند تأكيد المزوّد للتجدد، تنقلب القصبة وتسكب مرة واحدة في S.
 

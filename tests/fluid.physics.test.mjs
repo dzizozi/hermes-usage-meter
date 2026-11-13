@@ -4,11 +4,21 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const src=readFileSync(process.env.USAGE_PLUGIN_PATH||new URL('../desktop/plugin.js',import.meta.url),'utf8').replace(/^import .*$/gm,'').replace('export default','globalThis.plugin=');
 function load(){const b={console,Date,Intl,Number,Math,atom:v=>({get:()=>v,set:n=>{v=n}}),jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})};vm.createContext(b);vm.runInContext(src,b);return b}
-test('watercourse redesign preserves the approved bamboo and W proportions',()=>{
- const b=load(),g=b.fluidGeometry(),width=p=>Math.max(...p.map(q=>q[0]))-Math.min(...p.map(q=>q[0]));
- assert.ok(Math.abs(width(g.bamboo)-54*1.1)<1e-9,'bamboo must grow10percent from v8');
- assert.ok(Math.abs(width(g.W)-66*1.4)<1e-9,'W must be140percent of its former width');
- assert.ok(Math.abs((Math.max(...g.bamboo.map(p=>p[1]))-Math.min(...g.bamboo.map(p=>p[1])))-12.8*1.1)<1e-9);
+const inside=(p,poly)=>{let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])c=!c}return c};
+const crosses=(p,q,r,s)=>{const o=(a,b,c)=>Math.sign((b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]));return o(p,q,r)*o(p,q,s)<0&&o(r,s,p)*o(r,s,q)<0};
+test('W is a W-shaped watercourse carved in a rock above the bamboo, pouring from its top-left end',()=>{
+ const b=load(),g=b.fluidGeometry(),w=g.weekly,ys=w.points.map(p=>p[1]),width=p=>Math.max(...p.map(q=>q[0]))-Math.min(...p.map(q=>q[0]));
+ assert.ok(Math.abs(width(g.bamboo)-54*1.1)<1e-9,'approved bamboo size is unchanged');
+ assert.equal(w.points.length,5);assert.ok(ys[0]<ys[1]&&ys[1]>ys[2]&&ys[2]<ys[3]&&ys[3]>ys[4],'centreline must zig-zag like W');
+ for(let i=0;i<g.W.length;i++)for(let j=i+2;j<g.W.length;j++){if(i===0&&j===g.W.length-1)continue;assert.ok(!crosses(g.W[i],g.W[i+1],g.W[j],g.W[(j+1)%g.W.length]),'W bed must not self-intersect')}
+ for(const p of g.W)if(Math.hypot(p[0]-w.lip[0],p[1]-w.lip[1])>.01)assert.ok(inside(p,g.rock),'W must be carved inside the rock '+p);
+ const glass=[[113,158],[145,114],[258,114],[271,136],[258,158]].map(b.bambooPoint),restGlass=glass.map(p=>b.rotateFluidPoint(p,45));
+ assert.ok(Math.max(...g.W.map(p=>p[1]))<Math.min(...restGlass.map(p=>p[1])),'W is higher than the bamboo');
+ assert.ok(w.lip[0]<=Math.min(...w.points.map(p=>p[0]))&&w.lip[1]<=Math.min(...ys)+3,'water leaves from the top-left end');
+ const mouth=b.bambooPoint([144.4,98]);assert.ok(Math.abs(w.lip[0]-mouth[0])<2.5,'lip sits right above the bamboo mouth');
+ for(let y=w.lip[1]+4;y<mouth[1];y+=2){const t=(y-w.lip[1])/(mouth[1]-w.lip[1]),x=w.lip[0]-.5+(mouth[0]-w.lip[0]+.5)*t;assert.ok(!inside([x,y],g.rock),'falling water must stay outside the stone at y='+y)}
+ for(let a=45;a>=-28;a-=.5)for(const p of glass.map(q=>b.rotateFluidPoint(q,a)))assert.ok(!inside(p,g.rock),'tipping bamboo hits the rock at '+a);
+ const json=JSON.stringify(b.bambooScene(40,60,'rock-test',true,{progress:.5,artOnly:true}));assert.ok(json.includes('data-rock'));assert.ok(json.includes('w-watercourse-rock'));
 
 });
 test('S is one connected downhill watercourse from beneath the bamboo to its former lower position',()=>{
@@ -100,4 +110,28 @@ test('missing quota stays unknown, and waiting at a deadline does not start a je
  assert.equal(u.W.fraction,null);assert.equal(u.S.fraction,null);assert.equal(u.bamboo.fraction,null);assert.equal(u.jet.opacity,0);
  const awaiting=b.fluidFrame(0,14,{progress:1,phase:'awaiting',dumping:false},1000,0);
  assert.equal(awaiting.bamboo.fraction,1);assert.equal(awaiting.S.fraction,0);assert.equal(awaiting.jet.opacity,0);assert.equal(awaiting.angle,45);
+});
+
+test('S banks carry stones and wind-swayed grass that never sit in the water',()=>{
+ const b=load(),g=b.fluidGeometry(),scene=b.bambooScene(70,70,'garden-test',true,{progress:.5,artOnly:true}),json=JSON.stringify(scene);
+ assert.ok((json.match(/"data-grass"/g)||[]).length>=6);assert.ok((json.match(/"data-stone"/g)||[]).length>=5);
+ assert.ok(json.includes('usage-grass-sway'));
+ for(const [x,y] of b.fluidGeometry().grass)for(let k=0;k<5;k++)assert.ok(!inside([x,y-k*2],g.S)&&!inside([x,y-k*2],g.W),'grass in water '+x+','+y);
+ for(const [x,y,rx,ry] of b.fluidGeometry().stones)for(let a=0;a<6.28;a+=.4)assert.ok(!inside([x+rx*Math.cos(a),y+ry*Math.sin(a)],g.S),'stone in S '+x);
+});
+test('one or two butterflies visit every30 seconds, rest on grass, then leave',()=>{
+ const b=load();let pairs=0;
+ for(let c=0;c<40;c++){const seen=[0,1].map(i=>{let any=false;for(let t=0;t<30000;t+=250){const f=b.butterflyFlight(c*30000+t,i);if(f){any=true;assert.ok(f.opacity>=0&&f.opacity<=1&&f.flap>0&&f.flap<=1)}}return any});
+  assert.equal(seen[0],true,'at least one butterfly every cycle');if(seen[1])pairs++;
+  assert.equal(b.butterflyFlight(c*30000+20000,0),null,'butterflies leave before the next visit');
+  const enter=b.butterflyFlight(c*30000+10,0),rest=b.butterflyFlight(c*30000+5500,0);assert.ok(enter.opacity<.05&&(enter.x<0||enter.x>300),'arrives from outside');assert.equal(rest.perched,true);
+  assert.ok(b.fluidGeometry().grass.some(([x,y,s])=>Math.abs(rest.x-x)<8&&Math.abs(rest.y-(y-13*s-2))<3),'rests on a grass tuft')}
+ assert.ok(pairs>5&&pairs<35,'sometimes two butterflies: '+pairs);
+ assert.equal(b.butterflyFlight(Number.NaN,0),null);
+});
+test('displayed quota glides toward new provider values without overshoot; unknown and reduced motion snap',()=>{
+ const b=load();let v=80;const seen=[];for(let i=0;i<120;i++){v=b.easeShownQuota(v,60,100);seen.push(v)}
+ assert.ok(seen[0]<80&&seen[0]>60,'starts descending gradually');assert.equal(seen.at(-1),60,'settles exactly on the real value');
+ for(let i=1;i<seen.length;i++)assert.ok(seen[i]<=seen[i-1]&&seen[i]>=60);
+ assert.equal(b.easeShownQuota(80,null,100),null);assert.equal(b.easeShownQuota(undefined,42,100),42);assert.equal(b.easeShownQuota(80,60,100,true),60);
 });
