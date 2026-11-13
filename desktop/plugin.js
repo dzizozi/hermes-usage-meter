@@ -296,6 +296,10 @@ function makeSessionChannel() {
 // (x, 151+(z-h)cos45). The rock is a real extruded block standing on the ground
 // behind the bamboo; its top, where W is carved, is parallel to the ground.
 function groundToScreen(x,z,h=0) {return [x,151+(z-h)*CAMERA_K]}
+// Without convergence a level top reads as tilted toward the viewer, so the rock
+// recedes with mild perspective behind z=0 (its front stays aligned with the ground).
+var ROCK_PERSPECTIVE={cx:150,depth:380};
+function rockToScreen(x,z,h=0) {const s=1+Math.min(0,z)/ROCK_PERSPECTIVE.depth;return [ROCK_PERSPECTIVE.cx+(x-ROCK_PERSPECTIVE.cx)*s,151+z*CAMERA_K-h*CAMERA_K*s]}
 function convexHull(points) {
  const p=[...points].sort((a,b)=>a[0]-b[0]||a[1]-b[1]),cross=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]),lower=[],upper=[];
  for(const q of p){while(lower.length>1&&cross(lower.at(-2),lower.at(-1),q)<=0)lower.pop();lower.push(q)}
@@ -331,31 +335,40 @@ function makeWeeklyChannel() {
  const k=CAMERA_K,H=ROCK_3D.height,knots=[[174.5,32],[181,31],[187,33],[192,38],[195,44],[196,50],[200,57],[203,62],[207,66],[212,66.5],[216,62.5],[218,56],[221,50],[223,44],[226,40],[230,37.5],[234,37.5],[238,40],[240,44],[241,49],[246,55],[249,61],[253,65.5],[258,66.5],[262,63],[265,57],[268,51],[272,43],[276,35],[281,28],[288,23]];
  // The W lies in the level top of the block (height H), read by the viewer with
  // its top edge away from them; the groove deepens toward the outlet.
- const toGround=p=>[203+(p[0]-174.5)*.78,-66+(p[1]-23)/k*.82],project=p=>groundToScreen(p[0],p[1],H);
+ const toGround=p=>[203+(p[0]-174.5)*.78,-66+(p[1]-23)/k*.82],project=p=>rockToScreen(p[0],p[1],H);
  const channel=carvedChannel(catmullRom(knots.map(toGround),5),5,project);
  const last=channel.left.length-1,bedDepth=channel.left.map((_,i)=>1.2+3.4*(1-i/last));
  const bed=[...channel.left.map((p,i)=>[p[0],p[1]+bedDepth[i]]),...channel.right.map((p,i)=>[p[0],p[1]+bedDepth[i]]).reverse()];
  const foot=ROCK_3D.footprint,tops=foot.map((_,i)=>H-1+2.4*Math.sin(i*2.3));
- const plateau=foot.map((p,i)=>groundToScreen(p[0],p[1],tops[i])),base=foot.map(p=>groundToScreen(p[0],p[1],0));
+ const plateau=foot.map((p,i)=>rockToScreen(p[0],p[1],tops[i])),base=foot.map(p=>rockToScreen(p[0],p[1],0));
  // Only side faces whose outward normal points toward the camera are visible.
  const cx=foot.reduce((s,p)=>s+p[0],0)/foot.length,cz=foot.reduce((s,p)=>s+p[1],0)/foot.length,facets=[];
  for(let i=0;i<foot.length;i++){const j=(i+1)%foot.length,a=foot[i],b=foot[j];let n=[b[1]-a[1],-(b[0]-a[0])];const l=Math.hypot(n[0],n[1])||1;n=[n[0]/l,n[1]/l];
   if(n[0]*((a[0]+b[0])/2-cx)+n[1]*((a[1]+b[1])/2-cz)<0)n=[-n[0],-n[1]];
-  if(n[1]>.05)facets.push({shade:n[0]<-.35?'lit':n[0]>.35?'shade':'mid',normal:n,depth:(a[1]+b[1])/2,points:[base[i],base[j],plateau[j],plateau[i]]})}
+  const mx=(a[0]+b[0])/2,seen=n[1]>.05||(n[0]<-.3&&mx>ROCK_PERSPECTIVE.cx)||(n[0]>.3&&mx<ROCK_PERSPECTIVE.cx);
+  if(seen)facets.push({shade:n[0]<-.35?'lit':n[0]>.35?'shade':'mid',normal:n,depth:(a[1]+b[1])/2,points:[base[i],base[j],plateau[j],plateau[i]]})}
  facets.sort((a,b)=>a.depth-b.depth);
  const rock=convexHull([...plateau,...base]);
- // Kakei: a natural bamboo pipe takes the water from the W outlet over to the
- // rocker's mouth, sloping gently down; a crossed-stick trestle holds its middle.
- const mouth=bambooPoint([144.4,98]),postZ=(BAMBOO_POST.base-151)/k,mouthH=(151+postZ*k-mouth[1])/k;
- const start=[channel.ground[0][0],channel.ground[0][1],H-2.5],end=[mouth[0]-1.5,postZ,mouthH+8],mid=[0,1,2].map(i=>(start[i]+end[i])/2);
- const crossH=mid[2]-4.6,spread=7.5,stick=x=>[groundToScreen(x,mid[1],0),groundToScreen(mid[0]+(mid[0]-x)*.45,mid[1],crossH+(crossH)*.45*1)];
- const kakei={start,end,radius:3.4,screenStart:groundToScreen(...start),screenEnd:groundToScreen(...end),mouthHeight:mouthH,postDepth:postZ,
+ // Kakei: a bamboo as thick as the rocker, split lengthwise so only its lower
+ // half remains; it carries the W water, sloping down, to just above the mouth.
+ const mouth=bambooPoint([144.4,98]),postZ=(BAMBOO_POST.base-151)/k,mouthH=(151+postZ*k-mouth[1])/k,r=9.7;
+ const start=[channel.ground[0][0],channel.ground[0][1],H-1],end=[mouth[0]-1.5,postZ,mouthH+r+4],mid=[0,1,2].map(i=>(start[i]+end[i])/2);
+ const gl=Math.hypot(end[0]-start[0],end[1]-start[1]),n3=[-(end[1]-start[1])/gl,(end[0]-start[0])/gl];
+ const pt=(p,side,dh=0)=>rockToScreen(p[0]+n3[0]*r*side,p[1]+n3[1]*r*side,p[2]+dh),along=t=>[0,1,2].map(i=>start[i]+(end[i]-start[i])*t);
+ const rimA=[pt(start,1),pt(start,-1)],rimB=[pt(end,1),pt(end,-1)],profile=(p,steps=12)=>Array.from({length:steps+1},(_,i)=>{const a=i/steps*Math.PI;return pt(p,Math.cos(a),-r*Math.sin(a))});
+ const crossH=mid[2]-r-1.5,spread=7.5;
+ const kakei={start,end,radius:r,mouthHeight:mouthH,postDepth:postZ,screenStart:rockToScreen(...start),screenEnd:rockToScreen(...end),
+  outer:convexHull([...rimA,...rimB,...profile(start),...profile(end)]),inner:[rimA[0],rimB[0],rimB[1],rimA[1]],
+  water:[pt(start,.5,-r*.45),pt(end,.5,-r*.45),pt(end,-.5,-r*.45),pt(start,-.5,-r*.45)],waterAxis:[pt(start,0,-r*.4),pt(end,0,-r*.4)],
+  endProfile:profile(end),nodes:[.32,.66].map(t=>profile(along(t),8)),
   trestle:{depth:mid[1],crossHeight:crossH,feet:[mid[0]-spread,mid[0]+spread],sticks:[[groundToScreen(mid[0]-spread,mid[1],0),groundToScreen(mid[0]+spread*.5,mid[1],crossH*1.5)],[groundToScreen(mid[0]+spread,mid[1],0),groundToScreen(mid[0]-spread*.5,mid[1],crossH*1.5)]]}};
  // A rock outcrop at the spring hides where the water comes from. Its edge stops
  // just past the channel's end, so no quota-bearing water is ever covered.
  const end2=channel.points.at(-1),back=channel.points.at(-6),dl=Math.hypot(end2[0]-back[0],end2[1]-back[1]),d=[(end2[0]-back[0])/dl,(end2[1]-back[1])/dl],nn=[-d[1],d[0]];
  const at=(a,b)=>[end2[0]+d[0]*a+nn[0]*b,end2[1]+d[1]*a+nn[1]*b];
- const outcrop=catmullRom([at(1.3,-9),at(1.7,-4.5),at(1.2,0),at(1.7,4.5),at(1.5,9.5),at(6,15),[302,end2[1]+12],[308,end2[1]+14],[308,-10],[262,-10],[266,end2[1]-12],at(10,-17)],4,true);
+ // A weathered boulder sits on the slab over the spring; its near edge stops just
+ // past the channel end and its body rises above it.
+ const oc=[end2[0]+12,end2[1]-7],outcrop=Array.from({length:14},(_,i)=>{const a=i/14*Math.PI*2,s=Math.sin(a),rr=1+.12*Math.sin(i*2.7);return [oc[0]+17*Math.cos(a)*rr,oc[1]+(s>0?6.5*s:12*s)*rr]});
  return {...channel,lip:channel.points[0],spring:end2,springDirection:d,plateau,base,rock,facets,outcrop,kakei,rock3d:{footprint:foot,height:H,tops},surfaceTilt:{tiltDegrees:0,k,height:H},bed,bedDepth,surface:'rock',drainsFrom:'source'}
 }
 function pointInPolygon(p,poly) {let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])c=!c}return c}
@@ -529,6 +542,7 @@ function applyFluidFrame(svg,frame) {
  const jet=svg.querySelector('[data-bamboo-pour]');if(jet){jet.setAttribute('d',fluidJetPath(frame.jet));jet.style.opacity=String(frame.jet.opacity)}
  const internal=svg.querySelector('[data-fluid-internal]');if(internal)internal.style.opacity=String(frame.jet.opacity*.65);
  const inlet=svg.querySelector('[data-bamboo-inflow]');if(inlet){inlet.style.opacity=frame.flowing?'.9':'0';inlet.setAttribute('data-bamboo-flow',frame.flowing?'running':'stopped')}
+ for(const node of svg.querySelectorAll('[data-kakei-water],[data-kakei-current]'))node.style.opacity=frame.flowing?(node.hasAttribute('data-kakei-water')?'.95':'.7'):'0';
  const splash=svg.querySelector('[data-fluid-splash]');if(splash){const [x,y]=FLUID_GEOMETRY.channel.inlet,o=frame.jet.opacity,r=2.5+4.5*((frame.time%650)/650),ry=r*CAMERA_K*.55;splash.setAttribute('d',`M${round(x-r)} ${y}A${round(r)} ${round(ry)} 0 1 0 ${round(x+r)} ${y}A${round(r)} ${round(ry)} 0 1 0 ${round(x-r)} ${y}`);splash.style.opacity=String(o*.7)}
  for(const node of svg.querySelectorAll('[data-binary-digit]')){
   const d=frame.motion?binaryDigit(frame.time,Number(node.getAttribute('data-binary-digit')),frame.S.fraction):null;
@@ -664,19 +678,24 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
   ]}),
   jsx('ellipse',{'data-spring':'W',cx:spr[0]+g.weekly.springDirection[0]*2.2,cy:spr[1]+g.weekly.springDirection[1]*2.2,rx:3.2,ry:7.5,transform:`rotate(${sprAngle} ${spr[0]+g.weekly.springDirection[0]*2.2} ${spr[1]+g.weekly.springDirection[1]*2.2})`,fill:paint('crevice')})
  ]});
- const kk=w3.kakei,ka=kk.screenStart,kb=kk.screenEnd,kl=Math.hypot(kb[0]-ka[0],kb[1]-ka[1]),ku=[(kb[0]-ka[0])/kl,(kb[1]-ka[1])/kl],kn=[-ku[1],ku[0]],kr=kk.radius,off=(p,s)=>[p[0]+kn[0]*kr*s,p[1]+kn[1]*kr*s],kf=p=>p.map(n=>Number(n.toFixed(2))).join(' ');
- const kakei=jsxs('g',{'data-kakei':true,children:[
-
-  ...kk.trestle.sticks.map((s,i)=>jsx('path',{'data-kakei-trestle':i,d:line(s),fill:'none',stroke:paint('post'),strokeWidth:2.3,strokeLinecap:'round'},`stick-${i}`)),
-  jsx('path',{d:`M${kf(groundToScreen(kk.start[0],kk.start[1],0))}L${kf(groundToScreen(kk.end[0],kk.end[1],0))}`,fill:'none',stroke:'#000',strokeOpacity:.35,strokeWidth:5,strokeLinecap:'round',filter:paint('soft')}),
-  jsx('path',{'data-kakei-pipe':true,d:`M${kf(off(ka,1))}L${kf(off(kb,1))}L${kf(off(kb,-1))}L${kf(off(ka,-1))}Z`,fill:paint('kakei')}),
-  ...[.3,.62].map((t,i)=>{const c=lerp2(ka,kb,t);return jsx('path',{d:`M${kf(off(c,1))}Q${kf([c[0]+ku[0]*1.6,c[1]+ku[1]*1.6])} ${kf(off(c,-1))}`,fill:'none',stroke:'#e4dc9c',strokeOpacity:.55,strokeWidth:.8},`kakei-node-${i}`)}),
-  jsx('path',{d:`M${kf(off(ka,.35))}L${kf(off(kb,.35))}`,fill:'none',stroke:'#fff7cf',strokeOpacity:.28,strokeWidth:1,strokeLinecap:'round'}),
-  jsx('ellipse',{'data-kakei-mouth':true,cx:kb[0],cy:kb[1],rx:kr,ry:kr*.55,transform:`rotate(${Math.atan2(kn[1],kn[0])*180/Math.PI} ${kb[0]} ${kb[1]})`,fill:'#1e1a0c',stroke:'#cfc584',strokeWidth:.6})
+ const kk=w3.kakei,kf=p=>p.map(n=>Number(n.toFixed(2))).join(' '),kb=kk.waterAxis[1];
+ const kakei=jsxs('g',{'data-kakei':'half-pipe',children:[
+  ...kk.trestle.sticks.map((s,i)=>jsx('path',{'data-kakei-trestle':i,d:line(s),fill:'none',stroke:paint('post'),strokeWidth:2.6,strokeLinecap:'round'},`stick-${i}`)),
+  jsx('path',{d:line([groundToScreen(kk.start[0],kk.start[1],0),groundToScreen(kk.end[0],kk.end[1],0)]),fill:'none',stroke:'#000',strokeOpacity:.35,strokeWidth:12,strokeLinecap:'round',filter:paint('soft')}),
+  jsx('path',{'data-kakei-pipe':true,d:fluidPath(kk.outer),fill:paint('kakei'),stroke:'#252b10',strokeOpacity:.5,strokeWidth:.5,strokeLinejoin:'round'}),
+  jsx('path',{'data-kakei-inside':true,d:fluidPath(kk.inner),fill:paint('kakei-inside')}),
+  jsx('g',{filter:paint('liquid-glow'),children:[
+   jsx('path',{'data-kakei-water':true,d:fluidPath(kk.water),fill:paint('liquid'),style:{opacity:0,animation:rainbow}}),
+   jsx('path',{'data-kakei-current':true,d:line(kk.waterAxis),fill:'none',stroke:'#f6eeff',strokeOpacity:.7,strokeWidth:.9,strokeDasharray:'4 9',strokeLinecap:'round',className:'usage-bamboo-flow',style:{opacity:0,animation:'usage-bamboo-flow 1.1s linear infinite'}})
+  ]}),
+  ...kk.nodes.map((n,i)=>jsx('path',{d:line(n),fill:'none',stroke:'#efe6b0',strokeOpacity:.6,strokeWidth:.9},`kakei-node-${i}`)),
+  jsx('path',{d:line([kk.inner[0],kk.inner[1]]),fill:'none',stroke:'#f3ecc2',strokeOpacity:.65,strokeWidth:.9}),
+  jsx('path',{d:line([kk.inner[3],kk.inner[2]]),fill:'none',stroke:'#f3ecc2',strokeOpacity:.45,strokeWidth:.8}),
+  jsx('path',{'data-kakei-mouth':true,d:line(kk.endProfile),fill:'none',stroke:'#e9dfa6',strokeWidth:1.3,strokeLinecap:'round'})
  ]});
  const digits=jsx('g',{'data-binary-stream':'S',filter:paint('liquid-glow'),children:Array.from({length:BINARY_SLOTS},(_,i)=>jsx('text',{'data-binary-digit':i,x:0,y:0,textAnchor:'middle',fontFamily:'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',fontWeight:700,fontSize:3.6,fill:'#3d9bff',style:{opacity:0},children:'0'},`digit-${i}`))});
  const decor=[...g.stones.map((s,i)=>({y:s.y,node:stoneNode(s,i)})),...g.grass.map((t,i)=>({y:t[1],node:tuftNode(t,i)}))].sort((a,b)=>a.y-b.y);
- return jsxs('svg',{'data-bamboo-scene':expanded?'expanded':'compact','data-material':'glass-bamboo','data-colour-style':'apple-reference-v10','data-scene':'kakei-block-v16','data-camera':'oblique-45','data-bamboo-scale':.44,'data-weekly-shape':'w-watercourse-rock','data-session-shape':'s-watercourse','data-fluid-engine':'gravity-volume-v7',
+ return jsxs('svg',{'data-bamboo-scene':expanded?'expanded':'compact','data-material':'glass-bamboo','data-colour-style':'apple-reference-v10','data-scene':'half-pipe-v17','data-camera':'oblique-45','data-bamboo-scale':.44,'data-weekly-shape':'w-watercourse-rock','data-session-shape':'s-watercourse','data-fluid-engine':'gravity-volume-v7',
   'data-flow-from':'W','data-flow-via':'cycle','data-flow-to':'S','data-outlet-position':'bottom','data-source-pipe':'none',
   'data-cycle-state':m.tipped?'dumping':cycle.phase||'unknown','data-cycle-progress':cycle.progress,'data-cycle-reset':cycle.resetMs,'data-physical-angle':frame.angle,
   viewBox:'0 0 300 266',width:expanded?'100%':68,height:expanded?236:20,'aria-hidden':true,style:{display:'block',flexShrink:0,overflow:'hidden'},children:[
@@ -701,7 +720,8 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
     jsxs('linearGradient',{id:uid('glass-body'),x1:'0%',y1:'0%',x2:'0%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:tint('.95','.03','155'),stopOpacity:.25}),jsx('stop',{offset:'25%',stopColor:tint('.80','.05','160'),stopOpacity:.045}),jsx('stop',{offset:'67%',stopColor:tint('.8','.04','185'),stopOpacity:.025}),jsx('stop',{offset:'100%',stopColor:tint('.75','.06','170'),stopOpacity:.2})]}),
     jsxs('linearGradient',{id:uid('glass-edge'),x1:'0%',y1:'0%',x2:'100%',y2:'90%',children:[jsx('stop',{offset:'0%',stopColor:white,stopOpacity:.55}),jsx('stop',{offset:'35%',stopColor:tint('.8','.07','160'),stopOpacity:.5}),jsx('stop',{offset:'70%',stopColor:white,stopOpacity:.4}),jsx('stop',{offset:'100%',stopColor:tint('.65','.06','175'),stopOpacity:.45})]}),
     gradient('post',[['0%','#3e4a22'],['28%','#6f7d3c'],['46%','#a9ad6c'],['60%','#86904c'],['100%','#323c1a']],{x2:'100%',y2:'0%'}),
-    jsx('linearGradient',{id:uid('kakei'),gradientUnits:'userSpaceOnUse',x1:off(ka,1)[0],y1:off(ka,1)[1],x2:off(ka,-1)[0],y2:off(ka,-1)[1],children:[jsx('stop',{offset:'0%',stopColor:'#3e4a22'}),jsx('stop',{offset:'40%',stopColor:'#a9ad6c'}),jsx('stop',{offset:'100%',stopColor:'#323c1a'})]}),
+    gradient('kakei',[['0%','#59652d'],['45%','#8f9a52'],['100%','#323c1a']],{x2:'100%'}),
+    gradient('kakei-inside',[['0%','#e2d6a0'],['55%','#bba970'],['100%','#8c7c48']],{x2:'60%'}),
     gradient('face-depth',[['0%','#000',0],['55%','#000',.08],['100%','#000',.45]]),
     gradient('post-cut',[['0%','#e3dcb0'],['100%','#a99f6c']]),
     jsxs('radialGradient',{id:uid('peg'),cx:'40%',cy:'38%',children:[jsx('stop',{offset:'0%',stopColor:'#c89a5a'}),jsx('stop',{offset:'100%',stopColor:'#6b4720'})]}),
@@ -759,7 +779,7 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
    ]},String(cycle.eventId||'idle')),
    frame.bamboo.fraction===null?jsx('text',{'data-bamboo-unknown':'cycle',x:bambooPoint([212,157])[0],y:bambooPoint([212,157])[1],textAnchor:'middle',fontSize:7,fontWeight:650,fill:muted,children:usageText().unknownMark}):null,
    frontPost,
-   jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-inflow':'W','data-bamboo-flow':frame.flowing?'running':'stopped',d:`M${from.join(' ')}L${lip.join(' ')}M${kb[0]} ${kb[1]+1}L${mouth.join(' ')}`,fill:'none',stroke:paint('liquid'),strokeWidth:2.4,strokeLinecap:'round',strokeDasharray:'7 2',className:'usage-bamboo-flow',style:{opacity:frame.flowing?.9:0,animation:`usage-bamboo-flow 1.3s linear infinite, ${rainbow}`}})}),
+   jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-inflow':'W','data-bamboo-flow':frame.flowing?'running':'stopped',d:`M${from.join(' ')}L${lip.join(' ')}M${kb[0]} ${kb[1]}L${mouth.join(' ')}`,fill:'none',stroke:paint('liquid'),strokeWidth:2.4,strokeLinecap:'round',strokeDasharray:'7 2',className:'usage-bamboo-flow',style:{opacity:frame.flowing?.9:0,animation:`usage-bamboo-flow 1.3s linear infinite, ${rainbow}`}})}),
    ...decor.filter(d=>d.y>=feet).map(d=>d.node),
    jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-pour':'S',d:fluidJetPath(frame.jet),fill:paint('liquid'),style:{opacity:frame.jet.opacity,animation:rainbow}})}),
    digits,
@@ -907,7 +927,7 @@ function UsageCorner() {
  useEffect(()=>{usageView.set({...source,cycle,selectedAccount,onSelectAccount:id=>setSelectedAccount({provider:rawProvider?.slug,id})})})
  useEffect(()=>()=>usageView.set(null),[])
  useEffect(()=>observeNativeSurfaces(layerNode.current),[])
- useEffect(()=>{try{widgetStorage?.set('floating-art-v1',geometryRef.current);widgetStorage?.set('fluid-engine-v7',true);widgetStorage?.set('proportions-v8',true);widgetStorage?.set('siri-neon-v9',true);widgetStorage?.set('apple-reference-v10',true);widgetStorage?.set('s-watercourse-v11',true);widgetStorage?.set('rock-garden-v12',true);widgetStorage?.set('rock-garden-v13',true);widgetStorage?.set('mountain-i18n-v14',true);widgetStorage?.set('flat-rock-post-v15',true);widgetStorage?.set('kakei-block-v16',true)}catch{}},[])
+ useEffect(()=>{try{widgetStorage?.set('floating-art-v1',geometryRef.current);widgetStorage?.set('fluid-engine-v7',true);widgetStorage?.set('proportions-v8',true);widgetStorage?.set('siri-neon-v9',true);widgetStorage?.set('apple-reference-v10',true);widgetStorage?.set('s-watercourse-v11',true);widgetStorage?.set('rock-garden-v12',true);widgetStorage?.set('rock-garden-v13',true);widgetStorage?.set('mountain-i18n-v14',true);widgetStorage?.set('flat-rock-post-v15',true);widgetStorage?.set('kakei-block-v16',true);widgetStorage?.set('half-pipe-v17',true)}catch{}},[])
  useEffect(()=>{if(!open)return;const key=e=>{if(e.key==='Escape')setOpen(false)};document.addEventListener('keydown',key);return()=>document.removeEventListener('keydown',key)},[open])
  useEffect(()=>{const fit=()=>{const next=clampFloatingRect(geometryRef.current,floatingViewport());geometryRef.current=next;setGeometry(next)};window.addEventListener('resize',fit);return()=>window.removeEventListener('resize',fit)},[])
  function move(next,persist=false) {
@@ -948,7 +968,7 @@ export default {
   widgetStorage=ctx.storage||null
   // Installs from before the language choice were Arabic-only: keep them Arabic.
   try{let saved=widgetStorage?.get('language',null);if(saved==null&&widgetStorage?.get('floating-art-v1',null)!=null){saved='ar';widgetStorage.set('language','ar')}languageAtom.set(saved||'auto')}catch{}
-  console.info('[usage-meter] kakei-block-v16 loaded')
+  console.info('[usage-meter] half-pipe-v17 loaded')
   ctx.register({id:'usage-corner-auto-v2',area:'statusBar.left',order:-10000,render:()=>jsx(UsageCorner,{})})
  }
 }
