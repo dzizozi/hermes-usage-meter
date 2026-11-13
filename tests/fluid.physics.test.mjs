@@ -6,31 +6,31 @@ const src=readFileSync(process.env.USAGE_PLUGIN_PATH||new URL('../desktop/plugin
 function load(){const b={console,Date,Intl,Number,Math,atom:v=>({get:()=>v,set:n=>{v=n}}),jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})};vm.createContext(b);vm.runInContext(src,b);return b}
 const inside=(p,poly)=>{let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])c=!c}return c};
 const crosses=(p,q,r,s)=>{const o=(a,b,c)=>Math.sign((b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]));return o(p,q,r)*o(p,q,s)<0&&o(r,s,p)*o(r,s,q)<0};
-test('45-degree camera: W is a meandering W groove carved into the flat 5-degree slab of a grounded rock, pouring from its left end',()=>{
- const b=load(),g=b.fluidGeometry(),w=g.weekly,k=Math.SQRT1_2,width=p=>Math.max(...p.map(q=>q[0]))-Math.min(...p.map(q=>q[0]));
+test('45-degree camera: the rock is a grounded block whose level top carries the W, and a kakei pipe brings its water to the rocker',()=>{
+ const b=load(),g=b.fluidGeometry(),w=g.weekly,k=Math.SQRT1_2,r3=w.rock3d,H=r3.height,P=(x,z,h)=>[x,151+(z-h)*k];
+ const width=p=>Math.max(...p.map(q=>q[0]))-Math.min(...p.map(q=>q[0]));
  assert.ok(Math.abs(width(g.bamboo)-54*1.1)<1e-9,'approved bamboo size is unchanged');
- assert.equal(g.camera.elevation,45);
- const sf=w.surfaceTilt;assert.equal(sf.tiltDegrees,5);assert.ok(Math.abs(sf.k-Math.sin(50*Math.PI/180))<1e-12,'level slab seen at 45deg plus a 5deg forward lean');
- for(let i=0;i<w.ground.length;i++)assert.ok(w.points[i][0]===w.ground[i][0]&&Math.abs(w.points[i][1]-(sf.originY+w.ground[i][1]*sf.k))<1e-9,'W lies in the flat slab, no sideways tilt');
- assert.ok(Math.abs(w.spring[1]-w.lip[1])<12,'flat: spring and outlet sit at nearly the same height');
- const xs=w.points.map(p=>p[0]),ys0=w.points.map(p=>p[1]);assert.ok((Math.max(...ys0)-Math.min(...ys0))/(Math.max(...xs)-Math.min(...xs))<.45,'the letter lies down instead of standing toward the viewer');
- for(let i=1;i<w.bedDepth.length;i++)assert.ok(w.bedDepth[i]<=w.bedDepth[i-1],'the groove deepens toward the outlet');assert.ok(w.bedDepth[0]-w.bedDepth.at(-1)>2.5);
- const P=w.points,inRange=(lo,hi)=>P.filter(p=>p[0]>=lo&&p[0]<=hi).map(p=>p[1]);
- const v1=Math.max(...inRange(198,222)),v2=Math.max(...inRange(244,268)),mid=Math.min(...inRange(225,240));
- assert.ok(v1-mid>15&&v2-mid>15,'two valleys around a raised middle');assert.ok(P[0][1]<v1-15&&P.at(-1)[1]<v2-15,'both W ends rise above the valleys');for(let i=1;i<P.length;i++)assert.ok(P[i][0]>=P[i-1][0]-1e-9,'W reads left to right without loops');
- let turns=0,last=0;for(let i=1;i<P.length-1;i++){const c=Math.sign((P[i][0]-P[i-1][0])*(P[i+1][1]-P[i][1])-(P[i][1]-P[i-1][1])*(P[i+1][0]-P[i][0]));if(c&&last&&c!==last)turns++;if(c)last=c}
- assert.ok(turns>=8,'natural meanders, not a stiff letter: '+turns);
+ assert.equal(g.camera.elevation,45);assert.equal(w.surfaceTilt.tiltDegrees,0,'top is parallel to the ground');
+ for(let i=0;i<w.ground.length;i++){const q=P(w.ground[i][0],w.ground[i][1],H);assert.ok(Math.abs(w.points[i][0]-q[0])<1e-9&&Math.abs(w.points[i][1]-q[1])<1e-9,'W lies in the level top at height H')}
+ for(const [x,z] of w.ground)assert.ok(inside([x,z],r3.footprint),'W is carved inside the block top '+x+','+z);
+ for(let i=0;i<r3.footprint.length;i++){const [x,z]=r3.footprint[i],base=P(x,z,0);assert.ok(Math.abs(w.base[i][1]-base[1])<1e-9);assert.ok(Math.abs(w.plateau[i][1]-P(x,z,r3.tops[i])[1])<1e-9)}
+ const front=Math.max(...r3.footprint.map(p=>p[1])),post=w.kakei.postDepth;
+ assert.ok(151+front*k>135&&inside([250,151+front*k-2],g.ground),'the block stands on solid ground, not in the mist');
+ assert.ok(front<post-9.7-8,'3-D clearance: the rock stands behind the rocker plane, so tipping never touches it');
+ assert.ok(H>w.kakei.mouthHeight+10,'the W top is higher than the rocker mouth');
+ const ys=w.points.map(p=>p[1]),xs=w.points.map(p=>p[0]);assert.ok((Math.max(...ys)-Math.min(...ys))/(Math.max(...xs)-Math.min(...xs))<.5,'the letter lies down');
+ const PP=w.points,inRange=(lo,hi)=>PP.filter(p=>p[0]>=lo&&p[0]<=hi).map(p=>p[1]),v1=Math.max(...inRange(205,230)),v2=Math.max(...inRange(250,275)),mid=Math.min(...inRange(232,248));
+ assert.ok(v1-mid>15&&v2-mid>15,'two valleys around a raised middle');assert.ok(PP[0][1]<v1-15&&PP.at(-1)[1]<v2-15,'both W ends at the far side');
+ for(let i=1;i<PP.length;i++)assert.ok(PP[i][0]>=PP[i-1][0]-1e-9,'W reads left to right');
  for(let i=0;i<g.W.length;i++)for(let j=i+2;j<g.W.length;j++){if(i===0&&j===g.W.length-1)continue;assert.ok(!crosses(g.W[i],g.W[i+1],g.W[j],g.W[(j+1)%g.W.length]),'W bed must not self-intersect')}
- for(const p of g.W)if(Math.hypot(p[0]-w.lip[0],p[1]-w.lip[1])>7){assert.ok(inside(p,g.plateau),'W must be carved into the rock top '+p);assert.ok(inside(p,g.rock))}
- const rockBottom=Math.max(...g.rock.map(p=>p[1]));assert.ok(rockBottom<130&&rockBottom-Math.min(...g.rock.map(p=>p[1]))<125,'a boulder, not a pillar');
- for(const p of g.rock.filter(p=>p[1]>100))assert.ok(inside(p,g.ground),'rock base rests on the ground '+p);
- const glass=[[113,158],[145,114],[258,114],[271,136],[258,158]].map(b.bambooPoint),restGlass=glass.map(p=>b.rotateFluidPoint(p,45));
- assert.ok(Math.max(...g.W.map(p=>p[1]))<Math.min(...restGlass.map(p=>p[1])),'W is higher than the bamboo');
- assert.ok(w.lip[0]<=Math.min(...P.map(p=>p[0])),'water leaves from the left end');
- const mouth=b.bambooPoint([144.4,98]);assert.ok(w.lip[0]>mouth[0]&&w.lip[0]-mouth[0]<6,'jet leaves leftward and lands in the mouth');
- for(let s=.1;s<1;s+=.01){const x=w.lip[0]+(mouth[0]-w.lip[0])*s,y=w.lip[1]+(mouth[1]-w.lip[1])*s*s;assert.ok(!inside([x,y],g.rock),'falling water must stay outside the stone at y='+y)}
- for(let a=45;a>=-28;a-=.5){const p=glass.map(q=>b.rotateFluidPoint(q,a));for(let i=0;i<p.length;i++)for(let t=0;t<=1;t+=.05){const A=p[i],B=p[(i+1)%p.length];assert.ok(!inside([A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t],g.rock),'tipping bamboo hits the rock at '+a)}}
- const json=JSON.stringify(b.bambooScene(40,60,'rock-test',true,{progress:.5,artOnly:true}));for(const s of ['data-rock','w-watercourse-rock','oblique-45','data-rock-facet','data-ground-plane'])assert.ok(json.includes(s),s);
+ for(let i=1;i<w.bedDepth.length;i++)assert.ok(w.bedDepth[i]<=w.bedDepth[i-1],'the groove deepens toward the outlet');
+ const kk=w.kakei,mouth=b.bambooPoint([144.4,98]);
+ assert.ok(Math.hypot(kk.start[0]-w.ground[0][0],kk.start[1]-w.ground[0][1])<1e-9,'the pipe starts at the W outlet');
+ assert.ok(kk.start[2]>kk.end[2],'the pipe slopes down toward the rocker');assert.ok(kk.end[2]>kk.mouthHeight&&kk.end[2]-kk.mouthHeight<12,'it ends just above the mouth');
+ assert.ok(Math.abs(kk.end[1]-post)<1e-9&&Math.abs(kk.end[0]-mouth[0])<3,'the pipe end is right over the mouth in 3-D');
+ assert.ok(Math.abs(kk.screenEnd[0]-mouth[0])<3&&kk.screenEnd[1]<mouth[1],'so the short drop lands in the mouth');
+ const t=kk.trestle;assert.ok(t.feet[0]<t.feet[1]&&t.crossHeight<(kk.start[2]+kk.end[2])/2-kk.radius,'a crossed trestle supports the pipe from the ground');
+ const json=JSON.stringify(b.bambooScene(40,60,'rock-test',true,{progress:.5,artOnly:true}));for(const s of ['data-rock','w-watercourse-rock','oblique-45','data-rock-facet','data-ground-plane','data-kakei-pipe','data-kakei-trestle'])assert.ok(json.includes(s),s);
 });
 test('S lies flat on the ground under the same 45-degree camera, from beneath the bamboo to its former lower position',()=>{
  const b=load(),g=b.fluidGeometry(),k=Math.SQRT1_2;assert.ok(g.channel,'S must expose its actual watercourse geometry');

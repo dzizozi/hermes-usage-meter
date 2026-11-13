@@ -292,10 +292,17 @@ function makeSessionChannel() {
 }
 // W is carved into the flat top of a boulder that sits on the ground behind the
 // bamboo. Water rises at the right-hand spring and leaves from the left end.
-// The rock top is a flat slab parallel to the ground, leaning only 5 degrees toward
-// the viewer, so the 45-degree camera sees it at sin(50deg). The W groove itself
-// deepens toward the outlet, which is what carries the water there.
-const WEEKLY_SURFACE={tiltDegrees:5,k:Math.sin(50*Math.PI/180),depthScale:.88,originY:31};
+// One 45-degree camera for everything: ground point (x,z) at height h appears at
+// (x, 151+(z-h)cos45). The rock is a real extruded block standing on the ground
+// behind the bamboo; its top, where W is carved, is parallel to the ground.
+function groundToScreen(x,z,h=0) {return [x,151+(z-h)*CAMERA_K]}
+function convexHull(points) {
+ const p=[...points].sort((a,b)=>a[0]-b[0]||a[1]-b[1]),cross=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]),lower=[],upper=[];
+ for(const q of p){while(lower.length>1&&cross(lower.at(-2),lower.at(-1),q)<=0)lower.pop();lower.push(q)}
+ for(const q of p.reverse()){while(upper.length>1&&cross(upper.at(-2),upper.at(-1),q)<=0)upper.pop();upper.push(q)}
+ return [...lower.slice(0,-1),...upper.slice(0,-1)]
+}
+var ROCK_3D={height:96,footprint:[[199,-97],[224,-104],[252,-105],[278,-100],[298,-90],[307,-66],[307,-24],[298,-6],[278,2.5],[252,5],[226,1.5],[208,-5],[197,-19],[194.5,-46],[196,-76]]};
 // A large rocky mountain fills the back of the scene; the boulder stands at its foot.
 // Ridges are layered smooth noise; light comes from the upper left, so every slope
 // that falls to the right is in shade and each valley sends a gully down the face.
@@ -321,29 +328,35 @@ function makeMountain() {
  return {far,near,shade,gullies,highlights,shrubs,base}
 }
 function makeWeeklyChannel() {
- const k=CAMERA_K,knots=[[174.5,32],[181,31],[187,33],[192,38],[195,44],[196,50],[200,57],[203,62],[207,66],[212,66.5],[216,62.5],[218,56],[221,50],[223,44],[226,40],[230,37.5],[234,37.5],[238,40],[240,44],[241,49],[246,55],[249,61],[253,65.5],[258,66.5],[262,63],[265,57],[268,51],[272,43],[276,35],[281,28],[288,23]];
- const S=WEEKLY_SURFACE,toGround=p=>[p[0],(p[1]-23)/k*S.depthScale],project=p=>[p[0],S.originY+p[1]*S.k];
- // Design-space points (drawn for a level cos45 view) laid onto the 5-degree slab.
- const tilt=(p,weight=1)=>[p[0],p[1]+weight*(project(toGround(p))[1]-p[1])];
+ const k=CAMERA_K,H=ROCK_3D.height,knots=[[174.5,32],[181,31],[187,33],[192,38],[195,44],[196,50],[200,57],[203,62],[207,66],[212,66.5],[216,62.5],[218,56],[221,50],[223,44],[226,40],[230,37.5],[234,37.5],[238,40],[240,44],[241,49],[246,55],[249,61],[253,65.5],[258,66.5],[262,63],[265,57],[268,51],[272,43],[276,35],[281,28],[288,23]];
+ // The W lies in the level top of the block (height H), read by the viewer with
+ // its top edge away from them; the groove deepens toward the outlet.
+ const toGround=p=>[203+(p[0]-174.5)*.78,-66+(p[1]-23)/k*.82],project=p=>groundToScreen(p[0],p[1],H);
  const channel=carvedChannel(catmullRom(knots.map(toGround),5),5,project);
  const last=channel.left.length-1,bedDepth=channel.left.map((_,i)=>1.2+3.4*(1-i/last));
  const bed=[...channel.left.map((p,i)=>[p[0],p[1]+bedDepth[i]]),...channel.right.map((p,i)=>[p[0],p[1]+bedDepth[i]]).reverse()];
- // Irregular boulder: a weathered flat top (where W is carved) and faceted sides.
- const plateau=catmullRom([[176.5,27],[181,20],[189,15],[200,12.5],[213,11],[226,9],[241,10],[254,8.5],[267,11],[279,13],[288,18],[294.5,27],[295.5,40],[293,54],[290,66],[283,76],[270,81],[255,83.5],[240,82],[226,83],[212,80],[200,75.5],[193,67],[188.5,56],[184.5,45],[179.5,37.5]],4,true);
- const rock=catmullRom([[175,27],[178,19],[186,13],[197,10],[211,8.5],[224,6],[240,7],[252,5.5],[266,8],[279,10],[289,15],[296,24],[298.5,36],[297,50],[299,66],[297,84],[298,100],[294,112],[284,119],[272,123],[258,121.5],[246,118],[236,113],[224,110],[212,108.5],[200,106],[193,101],[190.5,90],[188,76],[185,62],[181,48],[177.5,37]],4,true);
- const facets=[
-  {shade:'lit',points:[[179.5,37.5],[184.5,45],[188.5,56],[193,67],[200,75.5],[204,92],[200,106],[193,101],[190.5,90],[188,76],[185,62],[181,48],[177.5,37]]},
-  {shade:'mid',points:[[200,75.5],[212,80],[226,83],[240,82],[244,98],[236,113],[224,110],[212,108.5],[200,106],[204,92]]},
-  {shade:'shade',points:[[240,82],[255,83.5],[270,81],[283,76],[290,66],[293,54],[295.5,40],[297,50],[299,66],[297,84],[298,100],[294,112],[284,119],[272,123],[258,121.5],[246,118],[236,113],[244,98]]}];
- // Points on the top tilt fully; the rock's foot stays planted on the ground.
- const lean=p=>tilt(p,Math.max(0,Math.min(1,(112-p[1])/27)));
- const top=plateau.map(p=>tilt(p)),body=rock.map(lean),faces=facets.map(f=>({...f,points:f.points.map(lean)}));
+ const foot=ROCK_3D.footprint,tops=foot.map((_,i)=>H-1+2.4*Math.sin(i*2.3));
+ const plateau=foot.map((p,i)=>groundToScreen(p[0],p[1],tops[i])),base=foot.map(p=>groundToScreen(p[0],p[1],0));
+ // Only side faces whose outward normal points toward the camera are visible.
+ const cx=foot.reduce((s,p)=>s+p[0],0)/foot.length,cz=foot.reduce((s,p)=>s+p[1],0)/foot.length,facets=[];
+ for(let i=0;i<foot.length;i++){const j=(i+1)%foot.length,a=foot[i],b=foot[j];let n=[b[1]-a[1],-(b[0]-a[0])];const l=Math.hypot(n[0],n[1])||1;n=[n[0]/l,n[1]/l];
+  if(n[0]*((a[0]+b[0])/2-cx)+n[1]*((a[1]+b[1])/2-cz)<0)n=[-n[0],-n[1]];
+  if(n[1]>.05)facets.push({shade:n[0]<-.35?'lit':n[0]>.35?'shade':'mid',normal:n,depth:(a[1]+b[1])/2,points:[base[i],base[j],plateau[j],plateau[i]]})}
+ facets.sort((a,b)=>a.depth-b.depth);
+ const rock=convexHull([...plateau,...base]);
+ // Kakei: a natural bamboo pipe takes the water from the W outlet over to the
+ // rocker's mouth, sloping gently down; a crossed-stick trestle holds its middle.
+ const mouth=bambooPoint([144.4,98]),postZ=(BAMBOO_POST.base-151)/k,mouthH=(151+postZ*k-mouth[1])/k;
+ const start=[channel.ground[0][0],channel.ground[0][1],H-2.5],end=[mouth[0]-1.5,postZ,mouthH+8],mid=[0,1,2].map(i=>(start[i]+end[i])/2);
+ const crossH=mid[2]-4.6,spread=7.5,stick=x=>[groundToScreen(x,mid[1],0),groundToScreen(mid[0]+(mid[0]-x)*.45,mid[1],crossH+(crossH)*.45*1)];
+ const kakei={start,end,radius:3.4,screenStart:groundToScreen(...start),screenEnd:groundToScreen(...end),mouthHeight:mouthH,postDepth:postZ,
+  trestle:{depth:mid[1],crossHeight:crossH,feet:[mid[0]-spread,mid[0]+spread],sticks:[[groundToScreen(mid[0]-spread,mid[1],0),groundToScreen(mid[0]+spread*.5,mid[1],crossH*1.5)],[groundToScreen(mid[0]+spread,mid[1],0),groundToScreen(mid[0]-spread*.5,mid[1],crossH*1.5)]]}};
  // A rock outcrop at the spring hides where the water comes from. Its edge stops
  // just past the channel's end, so no quota-bearing water is ever covered.
- const end=channel.points.at(-1),back=channel.points.at(-6),dl=Math.hypot(end[0]-back[0],end[1]-back[1]),d=[(end[0]-back[0])/dl,(end[1]-back[1])/dl],n=[-d[1],d[0]];
- const at=(a,b)=>[end[0]+d[0]*a+n[0]*b,end[1]+d[1]*a+n[1]*b];
- const outcrop=catmullRom([at(1.3,-9),at(1.7,-4.5),at(1.2,0),at(1.7,4.5),at(1.5,9.5),at(5,17),[300,40],[308,46],[308,-10],[232,-10],[236,-2],[248,3.5],[262,4],at(10,-17)],4,true);
- return {...channel,lip:channel.points[0],spring:end,springDirection:d,plateau:top,rock:body,facets:faces,outcrop,surfaceTilt:S,bed,bedDepth,onRock:lean,surface:'rock',drainsFrom:'source'}
+ const end2=channel.points.at(-1),back=channel.points.at(-6),dl=Math.hypot(end2[0]-back[0],end2[1]-back[1]),d=[(end2[0]-back[0])/dl,(end2[1]-back[1])/dl],nn=[-d[1],d[0]];
+ const at=(a,b)=>[end2[0]+d[0]*a+nn[0]*b,end2[1]+d[1]*a+nn[1]*b];
+ const outcrop=catmullRom([at(1.3,-9),at(1.7,-4.5),at(1.2,0),at(1.7,4.5),at(1.5,9.5),at(6,15),[302,end2[1]+12],[308,end2[1]+14],[308,-10],[262,-10],[266,end2[1]-12],at(10,-17)],4,true);
+ return {...channel,lip:channel.points[0],spring:end2,springDirection:d,plateau,base,rock,facets,outcrop,kakei,rock3d:{footprint:foot,height:H,tops},surfaceTilt:{tiltDegrees:0,k,height:H},bed,bedDepth,surface:'rock',drainsFrom:'source'}
 }
 function pointInPolygon(p,poly) {let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])c=!c}return c}
 function distanceToPolygon(p,poly) {let d=Infinity;for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy||1,t=Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/l));d=Math.min(d,Math.hypot(p[0]-a[0]-t*dx,p[1]-a[1]-t*dy))}return d}
@@ -557,10 +570,13 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
     name==='S'?jsx('path',{'data-fluid-splash':'S',fill:'none',stroke:white,strokeWidth:.8,style:{opacity:0}}):null
    ]}),
    jsx('path',{d:fluidPath(g[name]),fill:'none',stroke:onRock?'#d7d0e4':'#b39b7c',strokeOpacity:onRock?.3:.32,strokeWidth:.5,vectorEffect:'non-scaling-stroke'}),
-   value===null?jsx('text',{x:onRock?230:mid[0],y:onRock?g.weekly.onRock([230,30])[1]:mid[1]-6,textAnchor:'middle',fontFamily:'system-ui',fontSize:onRock?16:13.5,fontWeight:650,fill:muted,children:usageText().unknownMark}):null
+   value===null?jsx('text',{x:onRock?g.weekly.points[Math.floor(g.weekly.points.length/2)][0]:mid[0],y:onRock?g.weekly.points[Math.floor(g.weekly.points.length/2)][1]-6:mid[1]-6,textAnchor:'middle',fontFamily:'system-ui',fontSize:onRock?16:13.5,fontWeight:650,fill:muted,children:usageText().unknownMark}):null
   ]})};
  const moss=(cx,cy,rx,ry,key)=>jsx('ellipse',{cx,cy,rx,ry,fill:paint('moss')},key);
- const onRock=g.weekly.onRock,lines=list=>list.map(l=>'M'+l.map(p=>onRock(p).map(n=>Number(n.toFixed(2))).join(' ')).join('L')).join('');
+ const w3=g.weekly,lerp2=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t],line=pts=>'M'+pts.map(p=>p.map(n=>Number(n.toFixed(2))).join(' ')).join('L');
+ // Cracks run down some faces; moss gathers along the top edge and the foot.
+ const cracks=w3.facets.filter((_,i)=>i%3===1).map((f,i)=>{const [ba,bb,tb,ta]=f.points,t=.3+.4*sceneHash(i+3),top=lerp2(ta,tb,t),bottom=lerp2(ba,bb,t+.08),m1=lerp2(top,bottom,.35),m2=lerp2(top,bottom,.7);return line([top,[m1[0]+2.2,m1[1]],[m2[0]-1.5,m2[1]],bottom])}).join('');
+ const rockMoss=w3.facets.flatMap((f,i)=>{const [ba,bb,tb,ta]=f.points,top=lerp2(ta,tb,.5),foot=lerp2(ba,bb,.5),w=Math.hypot(tb[0]-ta[0],tb[1]-ta[1]);return [moss(top[0],top[1]+1.5,w*.35,2,`top-moss-${i}`),moss(foot[0],foot[1]-2,w*.42,3,`foot-moss-${i}`)]});
  const groundNode=jsxs('g',{'data-ground':'oblique-45',children:[
   jsx('path',{'data-ground-plane':true,d:fluidPath(g.ground),fill:paint('earth'),mask:`url(#${uid('ground-fade')})`,filter:paint('grain')}),
   jsx('path',{d:fluidPath(g.S),fill:'none',stroke:'#130e0a',strokeOpacity:.6,strokeWidth:7,strokeLinejoin:'round',filter:paint('soft')}),
@@ -568,16 +584,16 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
   ...g.pebbles.map(([x,y,r],i)=>jsx('ellipse',{cx:x,cy:y,rx:r,ry:r*.66,fill:i%3?'#6d6672':'#8a828f',fillOpacity:.7},`pebble-${i}`)),
  ]});
  const rock=jsxs('g',{'data-rock':'W',children:[
-  jsx('ellipse',{'data-contact-shadow':'rock',cx:244,cy:119,rx:62,ry:8,fill:'#000',fillOpacity:.55,filter:paint('soft')}),
+  jsx('path',{'data-contact-shadow':'rock',d:fluidPath(convexHull(w3.base).map(p=>[p[0]+3,p[1]+2.5])),fill:'#000',fillOpacity:.6,filter:paint('soft')}),
   jsxs('g',{filter:paint('grain'),children:[
    jsx('path',{'data-rock-body':true,d:fluidPath(g.rock),fill:paint('rock-face'),stroke:'#110f15',strokeOpacity:.6,strokeWidth:.6,strokeLinejoin:'round',vectorEffect:'non-scaling-stroke'}),
-   ...g.weekly.facets.map(f=>jsx('path',{'data-rock-facet':f.shade,d:fluidPath(f.points),fill:f.shade==='lit'?'#8a8494':f.shade==='mid'?'#4a4654':'#1d1b22',fillOpacity:f.shade==='lit'?.45:.5,stroke:'#0c0b10',strokeOpacity:.35,strokeWidth:.5,strokeLinejoin:'round'},f.shade)),
-   jsx('path',{d:lines([[[214,99],[224,101],[234,97]],[[262,109],[274,110],[286,105]],[[291,84],[288,96],[291,108]],[[232,92],[228,101],[232,109]],[[268,92],[273,100],[270,110]]]),fill:'none',stroke:'#0d0b10',strokeOpacity:.45,strokeWidth:.7,strokeLinecap:'round',strokeLinejoin:'round'}),
-   jsx('path',{d:lines([[[201,88],[207,86],[212,88]],[[246,97],[253,98],[259,96]],[[272,101],[278,102],[282,99]]]),fill:'none',stroke:'#cfc8dc',strokeOpacity:.14,strokeWidth:.9,strokeLinecap:'round'}),
-   jsx('path',{d:fluidPath(g.plateau.map(p=>[p[0],p[1]+2.4])),fill:'#0b0a0e',fillOpacity:.5}),
+   ...w3.facets.map((f,i)=>jsx('path',{'data-rock-facet':f.shade,d:fluidPath(f.points),fill:f.shade==='lit'?'#8a8494':f.shade==='mid'?'#55505f':'#2a2731',fillOpacity:.5},`facet-${i}`)),
+   jsx('path',{d:fluidPath(convexHull([...w3.plateau,...w3.base])),fill:paint('face-depth')}),
+   jsx('path',{d:cracks,fill:'none',stroke:'#0d0b10',strokeOpacity:.5,strokeWidth:.75,strokeLinecap:'round',strokeLinejoin:'round'}),
+   jsx('path',{d:fluidPath(g.plateau.map(p=>[p[0],p[1]+2.2])),fill:'#9b96a6',fillOpacity:.55}),
    jsx('path',{'data-rock-top':true,d:fluidPath(g.plateau),fill:paint('rock-top')}),
    jsx('path',{d:fluidPath(g.plateau),fill:'none',stroke:'#ece6f6',strokeOpacity:.26,strokeWidth:.7,vectorEffect:'non-scaling-stroke'}),
-   ...[[185,19,6,2.2],[266,79,10,2.4],[294.5,45,2.6,7],[206,13.5,7,1.9],[282,118,11,2.8],[214,105.5,8,2.2]].map(([x,y,rx,ry],i)=>{const p=onRock([x,y]);return moss(p[0],p[1],rx,ry,`rock-moss-${i}`)})
+   ...rockMoss
   ]})
  ]});
  const stoneNode=(s,i)=>jsxs('g',{'data-stone':i,children:[
@@ -648,9 +664,19 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
   ]}),
   jsx('ellipse',{'data-spring':'W',cx:spr[0]+g.weekly.springDirection[0]*2.2,cy:spr[1]+g.weekly.springDirection[1]*2.2,rx:3.2,ry:7.5,transform:`rotate(${sprAngle} ${spr[0]+g.weekly.springDirection[0]*2.2} ${spr[1]+g.weekly.springDirection[1]*2.2})`,fill:paint('crevice')})
  ]});
+ const kk=w3.kakei,ka=kk.screenStart,kb=kk.screenEnd,kl=Math.hypot(kb[0]-ka[0],kb[1]-ka[1]),ku=[(kb[0]-ka[0])/kl,(kb[1]-ka[1])/kl],kn=[-ku[1],ku[0]],kr=kk.radius,off=(p,s)=>[p[0]+kn[0]*kr*s,p[1]+kn[1]*kr*s],kf=p=>p.map(n=>Number(n.toFixed(2))).join(' ');
+ const kakei=jsxs('g',{'data-kakei':true,children:[
+
+  ...kk.trestle.sticks.map((s,i)=>jsx('path',{'data-kakei-trestle':i,d:line(s),fill:'none',stroke:paint('post'),strokeWidth:2.3,strokeLinecap:'round'},`stick-${i}`)),
+  jsx('path',{d:`M${kf(groundToScreen(kk.start[0],kk.start[1],0))}L${kf(groundToScreen(kk.end[0],kk.end[1],0))}`,fill:'none',stroke:'#000',strokeOpacity:.35,strokeWidth:5,strokeLinecap:'round',filter:paint('soft')}),
+  jsx('path',{'data-kakei-pipe':true,d:`M${kf(off(ka,1))}L${kf(off(kb,1))}L${kf(off(kb,-1))}L${kf(off(ka,-1))}Z`,fill:paint('kakei')}),
+  ...[.3,.62].map((t,i)=>{const c=lerp2(ka,kb,t);return jsx('path',{d:`M${kf(off(c,1))}Q${kf([c[0]+ku[0]*1.6,c[1]+ku[1]*1.6])} ${kf(off(c,-1))}`,fill:'none',stroke:'#e4dc9c',strokeOpacity:.55,strokeWidth:.8},`kakei-node-${i}`)}),
+  jsx('path',{d:`M${kf(off(ka,.35))}L${kf(off(kb,.35))}`,fill:'none',stroke:'#fff7cf',strokeOpacity:.28,strokeWidth:1,strokeLinecap:'round'}),
+  jsx('ellipse',{'data-kakei-mouth':true,cx:kb[0],cy:kb[1],rx:kr,ry:kr*.55,transform:`rotate(${Math.atan2(kn[1],kn[0])*180/Math.PI} ${kb[0]} ${kb[1]})`,fill:'#1e1a0c',stroke:'#cfc584',strokeWidth:.6})
+ ]});
  const digits=jsx('g',{'data-binary-stream':'S',filter:paint('liquid-glow'),children:Array.from({length:BINARY_SLOTS},(_,i)=>jsx('text',{'data-binary-digit':i,x:0,y:0,textAnchor:'middle',fontFamily:'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',fontWeight:700,fontSize:3.6,fill:'#3d9bff',style:{opacity:0},children:'0'},`digit-${i}`))});
  const decor=[...g.stones.map((s,i)=>({y:s.y,node:stoneNode(s,i)})),...g.grass.map((t,i)=>({y:t[1],node:tuftNode(t,i)}))].sort((a,b)=>a.y-b.y);
- return jsxs('svg',{'data-bamboo-scene':expanded?'expanded':'compact','data-material':'glass-bamboo','data-colour-style':'apple-reference-v10','data-scene':'flat-rock-post-v15','data-camera':'oblique-45','data-bamboo-scale':.44,'data-weekly-shape':'w-watercourse-rock','data-session-shape':'s-watercourse','data-fluid-engine':'gravity-volume-v7',
+ return jsxs('svg',{'data-bamboo-scene':expanded?'expanded':'compact','data-material':'glass-bamboo','data-colour-style':'apple-reference-v10','data-scene':'kakei-block-v16','data-camera':'oblique-45','data-bamboo-scale':.44,'data-weekly-shape':'w-watercourse-rock','data-session-shape':'s-watercourse','data-fluid-engine':'gravity-volume-v7',
   'data-flow-from':'W','data-flow-via':'cycle','data-flow-to':'S','data-outlet-position':'bottom','data-source-pipe':'none',
   'data-cycle-state':m.tipped?'dumping':cycle.phase||'unknown','data-cycle-progress':cycle.progress,'data-cycle-reset':cycle.resetMs,'data-physical-angle':frame.angle,
   viewBox:'0 0 300 266',width:expanded?'100%':68,height:expanded?236:20,'aria-hidden':true,style:{display:'block',flexShrink:0,overflow:'hidden'},children:[
@@ -675,6 +701,8 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
     jsxs('linearGradient',{id:uid('glass-body'),x1:'0%',y1:'0%',x2:'0%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:tint('.95','.03','155'),stopOpacity:.25}),jsx('stop',{offset:'25%',stopColor:tint('.80','.05','160'),stopOpacity:.045}),jsx('stop',{offset:'67%',stopColor:tint('.8','.04','185'),stopOpacity:.025}),jsx('stop',{offset:'100%',stopColor:tint('.75','.06','170'),stopOpacity:.2})]}),
     jsxs('linearGradient',{id:uid('glass-edge'),x1:'0%',y1:'0%',x2:'100%',y2:'90%',children:[jsx('stop',{offset:'0%',stopColor:white,stopOpacity:.55}),jsx('stop',{offset:'35%',stopColor:tint('.8','.07','160'),stopOpacity:.5}),jsx('stop',{offset:'70%',stopColor:white,stopOpacity:.4}),jsx('stop',{offset:'100%',stopColor:tint('.65','.06','175'),stopOpacity:.45})]}),
     gradient('post',[['0%','#3e4a22'],['28%','#6f7d3c'],['46%','#a9ad6c'],['60%','#86904c'],['100%','#323c1a']],{x2:'100%',y2:'0%'}),
+    jsx('linearGradient',{id:uid('kakei'),gradientUnits:'userSpaceOnUse',x1:off(ka,1)[0],y1:off(ka,1)[1],x2:off(ka,-1)[0],y2:off(ka,-1)[1],children:[jsx('stop',{offset:'0%',stopColor:'#3e4a22'}),jsx('stop',{offset:'40%',stopColor:'#a9ad6c'}),jsx('stop',{offset:'100%',stopColor:'#323c1a'})]}),
+    gradient('face-depth',[['0%','#000',0],['55%','#000',.08],['100%','#000',.45]]),
     gradient('post-cut',[['0%','#e3dcb0'],['100%','#a99f6c']]),
     jsxs('radialGradient',{id:uid('peg'),cx:'40%',cy:'38%',children:[jsx('stop',{offset:'0%',stopColor:'#c89a5a'}),jsx('stop',{offset:'100%',stopColor:'#6b4720'})]}),
     jsx('clipPath',{id:uid('mountain-clip'),children:jsx('path',{d:fluidPath(g.mountain.near)})}),
@@ -710,6 +738,7 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
    tank('S',sessionLeft),
    tank('W',weeklyLeft),
    outcrop,
+   kakei,
    !cycle.artOnly?jsx('text',{'data-weekly-remaining':weeklyLeft,'data-text-state':Number.isFinite(weeklyLeft)?'actual':'unknown',x:76,y:54,textAnchor:'middle',fontFamily:'system-ui',fontSize:16,fontWeight:650,fill:white,stroke:'#0b0a10',strokeOpacity:.7,strokeWidth:3,paintOrder:'stroke',children:Number.isFinite(weeklyLeft)?`${weeklyLeft.toLocaleString('en-US',{maximumFractionDigits:1})}%`:'—'}):null,
    !cycle.artOnly?jsx('text',{x:76,y:71,textAnchor:'middle',fontFamily:'system-ui',fontSize:9.5,fill:muted,children:Number.isFinite(weeklyLeft)?usageText().weeklyLeft:usageText().quotaUnavailable}):null,
    ...decor.filter(d=>d.y<feet).map(d=>d.node),
@@ -730,7 +759,7 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
    ]},String(cycle.eventId||'idle')),
    frame.bamboo.fraction===null?jsx('text',{'data-bamboo-unknown':'cycle',x:bambooPoint([212,157])[0],y:bambooPoint([212,157])[1],textAnchor:'middle',fontSize:7,fontWeight:650,fill:muted,children:usageText().unknownMark}):null,
    frontPost,
-   jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-inflow':'W','data-bamboo-flow':frame.flowing?'running':'stopped',d:`M${from.join(' ')}L${lip.join(' ')}Q${(lip[0]+mouth[0])/2} ${lip[1]} ${mouth.join(' ')}`,fill:'none',stroke:paint('liquid'),strokeWidth:2.4,strokeLinecap:'round',strokeDasharray:'7 2',className:'usage-bamboo-flow',style:{opacity:frame.flowing?.9:0,animation:`usage-bamboo-flow 1.3s linear infinite, ${rainbow}`}})}),
+   jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-inflow':'W','data-bamboo-flow':frame.flowing?'running':'stopped',d:`M${from.join(' ')}L${lip.join(' ')}M${kb[0]} ${kb[1]+1}L${mouth.join(' ')}`,fill:'none',stroke:paint('liquid'),strokeWidth:2.4,strokeLinecap:'round',strokeDasharray:'7 2',className:'usage-bamboo-flow',style:{opacity:frame.flowing?.9:0,animation:`usage-bamboo-flow 1.3s linear infinite, ${rainbow}`}})}),
    ...decor.filter(d=>d.y>=feet).map(d=>d.node),
    jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-pour':'S',d:fluidJetPath(frame.jet),fill:paint('liquid'),style:{opacity:frame.jet.opacity,animation:rainbow}})}),
    digits,
@@ -878,7 +907,7 @@ function UsageCorner() {
  useEffect(()=>{usageView.set({...source,cycle,selectedAccount,onSelectAccount:id=>setSelectedAccount({provider:rawProvider?.slug,id})})})
  useEffect(()=>()=>usageView.set(null),[])
  useEffect(()=>observeNativeSurfaces(layerNode.current),[])
- useEffect(()=>{try{widgetStorage?.set('floating-art-v1',geometryRef.current);widgetStorage?.set('fluid-engine-v7',true);widgetStorage?.set('proportions-v8',true);widgetStorage?.set('siri-neon-v9',true);widgetStorage?.set('apple-reference-v10',true);widgetStorage?.set('s-watercourse-v11',true);widgetStorage?.set('rock-garden-v12',true);widgetStorage?.set('rock-garden-v13',true);widgetStorage?.set('mountain-i18n-v14',true);widgetStorage?.set('flat-rock-post-v15',true)}catch{}},[])
+ useEffect(()=>{try{widgetStorage?.set('floating-art-v1',geometryRef.current);widgetStorage?.set('fluid-engine-v7',true);widgetStorage?.set('proportions-v8',true);widgetStorage?.set('siri-neon-v9',true);widgetStorage?.set('apple-reference-v10',true);widgetStorage?.set('s-watercourse-v11',true);widgetStorage?.set('rock-garden-v12',true);widgetStorage?.set('rock-garden-v13',true);widgetStorage?.set('mountain-i18n-v14',true);widgetStorage?.set('flat-rock-post-v15',true);widgetStorage?.set('kakei-block-v16',true)}catch{}},[])
  useEffect(()=>{if(!open)return;const key=e=>{if(e.key==='Escape')setOpen(false)};document.addEventListener('keydown',key);return()=>document.removeEventListener('keydown',key)},[open])
  useEffect(()=>{const fit=()=>{const next=clampFloatingRect(geometryRef.current,floatingViewport());geometryRef.current=next;setGeometry(next)};window.addEventListener('resize',fit);return()=>window.removeEventListener('resize',fit)},[])
  function move(next,persist=false) {
@@ -919,7 +948,7 @@ export default {
   widgetStorage=ctx.storage||null
   // Installs from before the language choice were Arabic-only: keep them Arabic.
   try{let saved=widgetStorage?.get('language',null);if(saved==null&&widgetStorage?.get('floating-art-v1',null)!=null){saved='ar';widgetStorage.set('language','ar')}languageAtom.set(saved||'auto')}catch{}
-  console.info('[usage-meter] flat-rock-post-v15 loaded')
+  console.info('[usage-meter] kakei-block-v16 loaded')
   ctx.register({id:'usage-corner-auto-v2',area:'statusBar.left',order:-10000,render:()=>jsx(UsageCorner,{})})
  }
 }
