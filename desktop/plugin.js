@@ -1,19 +1,117 @@
 // Local read-only widget. No credentials, external services, or paid API calls.
 import { host, useValue, useQuery, atom } from '@hermes/plugin-sdk'
+import * as hermesSdk from '@hermes/plugin-sdk'
 import { useEffect, useState, useId, useRef, useMemo, useLayoutEffect } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
+
+// Interface languages. The widget follows Hermes' own UI language unless the user
+// picks one in the details panel (saved in plugin storage).
+const USAGE_LANGUAGES=['ar','en','fr','es','zh']
+const USAGE_ENDONYMS={ar:'العربية',en:'English',fr:'Français',es:'Español',zh:'中文'}
+const USAGE_TEXT={
+ ar:{dir:'rtl',dateLocale:'ar-MA',unknownMark:'؟',
+  connecting:'جارٍ الاتصال ببيانات الموديل…',accountQuota:'حصة الحساب',pctUnavailable:'النسبة غير متاحة',left:n=>`${n}% متبقٍ`,remainingAria:n=>`المتبقي ${n}%`,used:n=>`المستهلك: ${n}%`,renewal:c=>`التجدد: ${c}`,
+  lastReading:'النسبة المعروضة آخر قراءة؛ لا نفترض تجدد الرصيد حتى يؤكده المزوّد.',accountN:i=>`الحساب ${i}`,states:{limited:'بلغ الحد',ready:'متاح',unavailable:'غير متاح',unknown:'بيانات غير متاحة'},
+  captionDumping:'تجددت الحصة — تُسكب القصبة الآن في S',captionAwaiting:'القصبة ممتلئة — بانتظار تأكيد التجدد من المزوّد',captionNoReset:'موعد تجدد القصبة غير متاح',captionFilling:(p,c)=>`امتلاء قصبة التجدد: ${p}% · المتبقي: ${c}`,
+  modelUsage:'الموديل والاستهلاك',sourceAccount:'حساب مصدر بيانات الحصة',autoAccount:'تلقائي: الحساب الذي يوفّر بيانات الحصة',waitingModel:'بانتظار اختيار الموديل',waitingProvider:'بانتظار بيانات المزوّد',
+  sessionTokens:'توكنز الجلسة الحالية',total:n=>`الإجمالي: ${n}`,inout:(i,o)=>`إدخال: ${i} · إخراج: ${o}`,context:(u,m)=>`السياق: ${u} / ${m} — ليس رصيد الاشتراك`,quotaHeading:'حصة الحساب ومواعيد التجدد',
+  otherProfile:'الحساب المعروض يتبع اتصالًا آخر؛ لا نعرض رصيد اتصال مختلف.',readingQuota:'جارٍ قراءة حصة الحساب…',readFailed:'تعذّرت قراءة حصة الحساب؛ اضغط تحديث للمحاولة.',
+  explanation:'W، المجرى المحفور في الصخرة، هو الرصيد الأسبوعي: يجف من جهة المنبع ويبقى الماء عند المصب. S، المجرى في الأرض، هو رصيد الجلسة الحالية (5 ساعات): يتجمع الماء في آخره وينحسر من جهة القصبة مع الاستهلاك. القصبة بينهما تمثل الوقت المنقضي حتى التجدد الفعلي، وليس مقدار الرصيد. تمتلئ ثم تسكب دفعة واحدة بعد تأكيد التجدد من المزوّد؛ التدفق والأرقام 0/1 المتطايرة رسم توضيحي وليس تحويلًا حقيقيًا للحصة. حصة الحساب قد تكون مشتركة بين الموديلات، والنسبة ليست عدد توكنز.',
+  staleAfterFail:'فشل آخر تحديث؛ المعروض آخر قراءة متاحة.',refreshing:'جارٍ التحديث…',refresh:'تحديث',autoRefresh:'تحديث تلقائي كل دقيقة؛ إعادة محاولة سريعة عند التشغيل أو انقطاع الاتصال.',
+  timeUnavailable:'موعد غير متاح',due:'حان الموعد — بانتظار تحديث المزوّد',duration:(d,h,m)=>(d?`${d} يوم و`:'')+`${h} س و${m} د`,
+  reasonMulti:'هناك عدة حسابات؛ تعرض البطاقة بيانات كل حساب دون دمج نسبها.',reasonGemini:'تكامل Gemini الحالي في Hermes لا يوفّر بيانات الحصة المتبقية ومواعيد التجدد. توكنز الجلسة تُعرض أعلاه، ولا نحوّلها إلى نسبة تخمينية.',
+  reasonClaude:'لم تصل بيانات حصة Claude في هذه القراءة. تحقق من حساب مصدر الحصة؛ لا نعرض نسبة تخمينية أو ندمج حسابين.',reasonGeneric:'لم يوفّر المزوّد بيانات الرصيد في هذه القراءة، أو لا يدعم التكامل عرضها.',
+  weeklyLeft:'متبقٍ أسبوعيًا',quotaUnavailable:'الحصة غير متاحة',widgetAria:'استهلاك الموديل — اسحب للتحريك واسحب الزاوية لتغيير الحجم',resizeAria:'تغيير حجم الرسمة',detailsAria:'تفاصيل استهلاك الموديل والرصيد',close:'إغلاق التفاصيل',
+  language:'اللغة',autoLanguage:'تلقائي (لغة Hermes)'},
+ en:{dir:'ltr',dateLocale:'en-US',unknownMark:'?',
+  connecting:'Connecting to model data…',accountQuota:'Account quota',pctUnavailable:'Percentage unavailable',left:n=>`${n}% left`,remainingAria:n=>`${n}% remaining`,used:n=>`Used: ${n}%`,renewal:c=>`Resets: ${c}`,
+  lastReading:'Showing the last reading; a reset is not assumed until the provider confirms it.',accountN:i=>`Account ${i}`,states:{limited:'Limit reached',ready:'Available',unavailable:'Unavailable',unknown:'No data'},
+  captionDumping:'Quota renewed — the bamboo is pouring into S',captionAwaiting:'Bamboo full — waiting for the provider to confirm the reset',captionNoReset:'Bamboo reset time unavailable',captionFilling:(p,c)=>`Bamboo reset fill: ${p}% · remaining: ${c}`,
+  modelUsage:'Model and usage',sourceAccount:'Quota source account',autoAccount:'Auto: the account that reports quota',waitingModel:'Waiting for a model',waitingProvider:'Waiting for provider data',
+  sessionTokens:'Current session tokens',total:n=>`Total: ${n}`,inout:(i,o)=>`Input: ${i} · Output: ${o}`,context:(u,m)=>`Context: ${u} / ${m} — not subscription quota`,quotaHeading:'Account quota and reset times',
+  otherProfile:'This account belongs to another connection; its quota is not shown here.',readingQuota:'Reading account quota…',readFailed:'Could not read account quota; press Refresh to retry.',
+  explanation:'W, the channel carved in the rock, is your weekly quota: it dries from its spring while the outlet end stays wet. S, the stream in the ground, is the current session (5-hour) quota: water gathers downstream and recedes from the inlet as you use it. The bamboo between them shows the time elapsed until the actual reset, not quota. It fills, then pours once the provider confirms the reset; the flow and the drifting 0/1 digits are illustration, not a real transfer of quota. Account quota may be shared across models, and the percentage is not a token count.',
+  staleAfterFail:'The last refresh failed; showing the last available reading.',refreshing:'Refreshing…',refresh:'Refresh',autoRefresh:'Refreshes automatically every minute, with quick retries at startup or after a dropped connection.',
+  timeUnavailable:'Time unavailable',due:'Due — waiting for the provider to update',duration:(d,h,m)=>(d?`${d} d `:'')+`${h} h ${m} min`,
+  reasonMulti:'Several accounts: each card shows its own data; percentages are never merged.',reasonGemini:"Hermes' current Gemini integration does not report remaining quota or reset times. Session tokens are shown above and are never turned into a guessed percentage.",
+  reasonClaude:'No Claude quota arrived in this reading. Check the quota source account; we never show a guessed percentage or merge two accounts.',reasonGeneric:'The provider did not report quota in this reading, or the integration cannot show it.',
+  weeklyLeft:'weekly left',quotaUnavailable:'quota unavailable',widgetAria:'Model usage — drag to move, drag the corner to resize',resizeAria:'Resize drawing',detailsAria:'Model usage and quota details',close:'Close details',
+  language:'Language',autoLanguage:'Auto (Hermes language)'},
+ fr:{dir:'ltr',dateLocale:'fr-FR',unknownMark:'?',
+  connecting:'Connexion aux données du modèle…',accountQuota:'Quota du compte',pctUnavailable:'Pourcentage indisponible',left:n=>`${n} % restant`,remainingAria:n=>`${n} % restant`,used:n=>`Consommé : ${n} %`,renewal:c=>`Renouvellement : ${c}`,
+  lastReading:'Dernière lecture affichée ; le renouvellement n’est pas supposé tant que le fournisseur ne l’a pas confirmé.',accountN:i=>`Compte ${i}`,states:{limited:'Limite atteinte',ready:'Disponible',unavailable:'Indisponible',unknown:'Données indisponibles'},
+  captionDumping:'Quota renouvelé — le bambou se déverse dans S',captionAwaiting:'Bambou plein — en attente de la confirmation du fournisseur',captionNoReset:'Heure de renouvellement du bambou indisponible',captionFilling:(p,c)=>`Remplissage du bambou : ${p} % · restant : ${c}`,
+  modelUsage:'Modèle et consommation',sourceAccount:'Compte source du quota',autoAccount:'Auto : le compte qui fournit le quota',waitingModel:'En attente d’un modèle',waitingProvider:'En attente des données du fournisseur',
+  sessionTokens:'Jetons de la session actuelle',total:n=>`Total : ${n}`,inout:(i,o)=>`Entrée : ${i} · Sortie : ${o}`,context:(u,m)=>`Contexte : ${u} / ${m} — ce n’est pas le quota de l’abonnement`,quotaHeading:'Quota du compte et heures de renouvellement',
+  otherProfile:'Ce compte dépend d’une autre connexion ; son quota n’est pas affiché ici.',readingQuota:'Lecture du quota du compte…',readFailed:'Impossible de lire le quota du compte ; appuyez sur Actualiser pour réessayer.',
+  explanation:'W, le canal creusé dans le rocher, est votre quota hebdomadaire : il s’assèche depuis sa source tandis que l’exutoire reste en eau. S, le ruisseau dans le sol, est le quota de la session actuelle (5 heures) : l’eau s’accumule en aval et recule depuis l’entrée à mesure que vous consommez. Le bambou entre les deux indique le temps écoulé jusqu’au renouvellement réel, pas le quota. Il se remplit puis se déverse une fois le renouvellement confirmé par le fournisseur ; l’écoulement et les chiffres 0/1 qui s’envolent sont illustratifs, pas un vrai transfert de quota. Le quota peut être partagé entre modèles, et le pourcentage n’est pas un nombre de jetons.',
+  staleAfterFail:'La dernière actualisation a échoué ; la dernière lecture disponible est affichée.',refreshing:'Actualisation…',refresh:'Actualiser',autoRefresh:'Actualisation automatique chaque minute ; nouvelles tentatives rapides au démarrage ou après une coupure.',
+  timeUnavailable:'Heure indisponible',due:'Échéance atteinte — en attente de la mise à jour du fournisseur',duration:(d,h,m)=>(d?`${d} j `:'')+`${h} h ${m} min`,
+  reasonMulti:'Plusieurs comptes : chaque carte affiche ses propres données, sans fusionner les pourcentages.',reasonGemini:'L’intégration Gemini actuelle de Hermes ne fournit ni le quota restant ni les heures de renouvellement. Les jetons de session sont affichés ci-dessus et ne sont jamais convertis en pourcentage estimé.',
+  reasonClaude:'Aucune donnée de quota Claude dans cette lecture. Vérifiez le compte source du quota ; nous n’affichons jamais de pourcentage estimé et ne fusionnons pas deux comptes.',reasonGeneric:'Le fournisseur n’a pas transmis de quota dans cette lecture, ou l’intégration ne permet pas de l’afficher.',
+  weeklyLeft:'restant cette semaine',quotaUnavailable:'quota indisponible',widgetAria:'Consommation du modèle — glisser pour déplacer, tirer le coin pour redimensionner',resizeAria:'Redimensionner le dessin',detailsAria:'Détails de consommation et de quota',close:'Fermer les détails',
+  language:'Langue',autoLanguage:'Auto (langue de Hermes)'},
+ es:{dir:'ltr',dateLocale:'es-ES',unknownMark:'?',
+  connecting:'Conectando con los datos del modelo…',accountQuota:'Cuota de la cuenta',pctUnavailable:'Porcentaje no disponible',left:n=>`${n} % restante`,remainingAria:n=>`${n} % restante`,used:n=>`Consumido: ${n} %`,renewal:c=>`Renovación: ${c}`,
+  lastReading:'Se muestra la última lectura; no se asume la renovación hasta que el proveedor la confirme.',accountN:i=>`Cuenta ${i}`,states:{limited:'Límite alcanzado',ready:'Disponible',unavailable:'No disponible',unknown:'Sin datos'},
+  captionDumping:'Cuota renovada: el bambú se vierte en S',captionAwaiting:'Bambú lleno: esperando la confirmación del proveedor',captionNoReset:'Hora de renovación del bambú no disponible',captionFilling:(p,c)=>`Llenado del bambú: ${p} % · restante: ${c}`,
+  modelUsage:'Modelo y consumo',sourceAccount:'Cuenta de origen de la cuota',autoAccount:'Automático: la cuenta que informa la cuota',waitingModel:'Esperando un modelo',waitingProvider:'Esperando datos del proveedor',
+  sessionTokens:'Tokens de la sesión actual',total:n=>`Total: ${n}`,inout:(i,o)=>`Entrada: ${i} · Salida: ${o}`,context:(u,m)=>`Contexto: ${u} / ${m}; no es la cuota de la suscripción`,quotaHeading:'Cuota de la cuenta y horas de renovación',
+  otherProfile:'Esta cuenta pertenece a otra conexión; aquí no se muestra su cuota.',readingQuota:'Leyendo la cuota de la cuenta…',readFailed:'No se pudo leer la cuota de la cuenta; pulse Actualizar para reintentar.',
+  explanation:'W, el canal tallado en la roca, es su cuota semanal: se seca desde el manantial mientras el extremo de salida sigue con agua. S, el arroyo en el suelo, es la cuota de la sesión actual (5 horas): el agua se acumula río abajo y retrocede desde la entrada a medida que la usa. El bambú entre ambos muestra el tiempo transcurrido hasta la renovación real, no la cuota. Se llena y se vierte cuando el proveedor confirma la renovación; el flujo y los dígitos 0/1 que se dispersan son ilustrativos, no una transferencia real de cuota. La cuota puede compartirse entre modelos y el porcentaje no es un número de tokens.',
+  staleAfterFail:'Falló la última actualización; se muestra la última lectura disponible.',refreshing:'Actualizando…',refresh:'Actualizar',autoRefresh:'Se actualiza automáticamente cada minuto; reintentos rápidos al iniciar o tras perder la conexión.',
+  timeUnavailable:'Hora no disponible',due:'Plazo cumplido: esperando la actualización del proveedor',duration:(d,h,m)=>(d?`${d} d `:'')+`${h} h ${m} min`,
+  reasonMulti:'Varias cuentas: cada tarjeta muestra sus propios datos, sin combinar porcentajes.',reasonGemini:'La integración actual de Gemini en Hermes no informa la cuota restante ni las horas de renovación. Los tokens de la sesión se muestran arriba y nunca se convierten en un porcentaje estimado.',
+  reasonClaude:'No llegaron datos de cuota de Claude en esta lectura. Revise la cuenta de origen de la cuota; nunca mostramos un porcentaje estimado ni combinamos dos cuentas.',reasonGeneric:'El proveedor no informó la cuota en esta lectura, o la integración no permite mostrarla.',
+  weeklyLeft:'restante semanal',quotaUnavailable:'cuota no disponible',widgetAria:'Consumo del modelo: arrastre para mover y arrastre la esquina para cambiar el tamaño',resizeAria:'Cambiar el tamaño del dibujo',detailsAria:'Detalles de consumo y cuota',close:'Cerrar detalles',
+  language:'Idioma',autoLanguage:'Automático (idioma de Hermes)'},
+ zh:{dir:'ltr',dateLocale:'zh-CN',unknownMark:'?',
+  connecting:'正在连接模型数据…',accountQuota:'账户额度',pctUnavailable:'百分比不可用',left:n=>`剩余 ${n}%`,remainingAria:n=>`剩余 ${n}%`,used:n=>`已用：${n}%`,renewal:c=>`重置：${c}`,
+  lastReading:'显示的是最近一次读取；在提供方确认之前，不假定额度已重置。',accountN:i=>`账户 ${i}`,states:{limited:'已达上限',ready:'可用',unavailable:'不可用',unknown:'无数据'},
+  captionDumping:'额度已重置——竹筒正在向 S 倾倒',captionAwaiting:'竹筒已满——等待提供方确认重置',captionNoReset:'竹筒重置时间不可用',captionFilling:(p,c)=>`竹筒重置进度：${p}% · 剩余：${c}`,
+  modelUsage:'模型与用量',sourceAccount:'额度来源账户',autoAccount:'自动：提供额度数据的账户',waitingModel:'等待选择模型',waitingProvider:'等待提供方数据',
+  sessionTokens:'当前会话 Token',total:n=>`总计：${n}`,inout:(i,o)=>`输入：${i} · 输出：${o}`,context:(u,m)=>`上下文：${u} / ${m}——不是订阅额度`,quotaHeading:'账户额度与重置时间',
+  otherProfile:'此账户属于另一个连接；此处不显示其额度。',readingQuota:'正在读取账户额度…',readFailed:'无法读取账户额度；请点击刷新重试。',
+  explanation:'W（刻在岩石中的水道）是每周额度：从源头开始干涸，出水口一端保持有水。S（地面上的溪流）是当前会话（5 小时）额度：水聚在下游，随着使用从入口处逐渐退去。两者之间的竹筒表示距离实际重置已过去的时间，而非额度。它会注满，并在提供方确认重置后一次倒出；水流和飘散的 0/1 数字只是示意，并非额度的真实转移。账户额度可能由多个模型共享，百分比也不是 Token 数量。',
+  staleAfterFail:'上次刷新失败；显示的是最近一次可用读取。',refreshing:'正在刷新…',refresh:'刷新',autoRefresh:'每分钟自动刷新；启动或断线后会快速重试。',
+  timeUnavailable:'时间不可用',due:'已到时间——等待提供方更新',duration:(d,h,m)=>(d?`${d} 天 `:'')+`${h} 小时 ${m} 分`,
+  reasonMulti:'存在多个账户：每张卡片显示各自的数据，不合并百分比。',reasonGemini:'Hermes 当前的 Gemini 集成不提供剩余额度和重置时间。会话 Token 显示在上方，且不会被换算为估计的百分比。',
+  reasonClaude:'本次读取未收到 Claude 额度数据。请检查额度来源账户；我们不会显示估计的百分比，也不会合并两个账户。',reasonGeneric:'提供方在本次读取中未提供额度，或该集成不支持显示额度。',
+  weeklyLeft:'本周剩余',quotaUnavailable:'额度不可用',widgetAria:'模型用量——拖动可移动，拖动角落可调整大小',resizeAria:'调整图形大小',detailsAria:'模型用量与额度详情',close:'关闭详情',
+  language:'语言',autoLanguage:'自动（Hermes 语言）'}
+}
+let currentLang='en'
+var languageAtom=atom(null)
+function resolveUsageLanguage(preference,hermesLocale) {
+ if(USAGE_LANGUAGES.includes(preference))return preference
+ const base=String(hermesLocale||'').toLowerCase().split(/[-_]/)[0]
+ return USAGE_LANGUAGES.includes(base)?base:'en'
+}
+function usageText(lang=currentLang) {return USAGE_TEXT[lang]||USAGE_TEXT.en}
+function setUsageLanguage(lang) {currentLang=USAGE_LANGUAGES.includes(lang)?lang:'en';return currentLang}
+// Optional on older Hermes builds: a namespace import never fails to link.
+function useUsageLanguage() {
+ const preference=useValue(languageAtom)
+ let locale=null
+ try{locale=typeof hermesSdk!=='undefined'&&typeof hermesSdk.useI18n==='function'?hermesSdk.useI18n()?.locale:null}catch{}
+ return setUsageLanguage(resolveUsageLanguage(preference,locale))
+}
+function chooseUsageLanguage(lang) {
+ const value=USAGE_LANGUAGES.includes(lang)?lang:'auto'
+ try{widgetStorage?.set('language',value)}catch{}
+ languageAtom.set(value)
+}
 
 function remaining(window) {
  return typeof window?.used_percent === 'number' && Number.isFinite(window.used_percent) ? Math.max(0, Math.min(100, 100-window.used_percent)) : null
 }
-function countdown(reset, now) {
- const stamp = reset ? Date.parse(reset) : NaN
- if (!Number.isFinite(stamp)) return 'موعد غير متاح'
+function countdown(reset, now, lang=currentLang) {
+ const t=usageText(lang), stamp = reset ? Date.parse(reset) : NaN
+ if (!Number.isFinite(stamp)) return t.timeUnavailable
  const seconds = Math.ceil((stamp-now)/1000)
- if (seconds <= 0) return 'حان الموعد — بانتظار تحديث المزوّد'
+ if (seconds <= 0) return t.due
  const minutes = Math.ceil(seconds/60)
- const days = Math.floor(minutes/1440), hours = Math.floor(minutes%1440/60), mins = minutes%60
- return (days ? `${days} يوم و` : '') + `${hours} س و${mins} د`
+ return t.duration(Math.floor(minutes/1440), Math.floor(minutes%1440/60), minutes%60)
 }
 // model.options returns cached quota first, then refreshes it asynchronously.
 // Re-read quickly during startup; never require plugin reload to see that refresh.
@@ -84,11 +182,12 @@ function gaugeRemaining(provider, kind='session', model='') {
  }
  return remaining(sessionQuotaWindow(provider))
 }
-function quotaUnavailableReason(slug,provider) {
- if(provider?.usage?.accounts?.length>1) return 'هناك عدة حسابات؛ تعرض البطاقة بيانات كل حساب دون دمج نسبها.'
- if(/^(gemini|google|google-gemini|google-ai-studio|solstice|solstice-oauth)$/.test(slug||'')) return 'تكامل Gemini الحالي في Hermes لا يوفّر بيانات الحصة المتبقية ومواعيد التجدد. توكنز الجلسة تُعرض أعلاه، ولا نحوّلها إلى نسبة تخمينية.'
- if(slug==='anthropic') return 'لم تصل بيانات حصة Claude في هذه القراءة. تحقق من حساب مصدر الحصة؛ لا نعرض نسبة تخمينية أو ندمج حسابين.'
- return 'لم يوفّر المزوّد بيانات الرصيد في هذه القراءة، أو لا يدعم التكامل عرضها.'
+function quotaUnavailableReason(slug,provider,lang=currentLang) {
+ const t=usageText(lang)
+ if(provider?.usage?.accounts?.length>1) return t.reasonMulti
+ if(/^(gemini|google|google-gemini|google-ai-studio|solstice|solstice-oauth)$/.test(slug||'')) return t.reasonGemini
+ if(slug==='anthropic') return t.reasonClaude
+ return t.reasonGeneric
 }
 function sessionQuotaWindow(provider) {
  const accounts=provider?.usage?.accounts
@@ -184,17 +283,46 @@ function carvedChannel(ground,half,project) {
 }
 function makeSessionChannel() {
  const project=p=>[p[0],151+p[1]*CAMERA_K],start=[160,0],ground=[start];let previous=start;
- const curves=[[[125,0],[90,10],[90,36]],[[90,56],[162,60],[168,84]],[[174,106],[156,133],[118,133]]];
+ // The last bend runs on past the left edge of the drawing, so the stream has no visible end.
+ const curves=[[[125,0],[90,10],[90,36]],[[90,56],[162,60],[168,84]],[[174,106],[156,133],[118,133]],[[86,133],[46,140],[1.6,150]]];
  for(const [a,b,c] of curves){const s=previous;for(let i=1;i<=28;i++){const t=i/28,u=1-t;ground.push([0,1].map(k=>u*u*u*s[k]+3*u*u*t*a[k]+3*u*t*t*b[k]+t*t*t*c[k]))}previous=c}
  const channel=carvedChannel(ground,7,project),pr=p=>project(p).map(n=>Number(n.toFixed(3))).join(' ');
  // The stream runs downhill from the bamboo; water pools at its far end first.
- return {...channel,inlet:[158,151],end:project([118,133]),width:14,surface:'ground',drainsFrom:'upstream',d:'M'+pr(start)+curves.map(c=>'C'+c.map(pr).join(' ')).join('')}
+ return {...channel,inlet:[158,151],end:project([1.6,150]),exitsView:true,width:14,surface:'ground',drainsFrom:'upstream',d:'M'+pr(start)+curves.map(c=>'C'+c.map(pr).join(' ')).join('')}
 }
 // W is carved into the flat top of a boulder that sits on the ground behind the
 // bamboo. Water rises at the right-hand spring and leaves from the left end.
+const WEEKLY_TILT={drop:20,slope:.2};
+// A large rocky mountain fills the back of the scene; the boulder stands at its foot.
+// Ridges are layered smooth noise; light comes from the upper left, so every slope
+// that falls to the right is in shade and each valley sends a gully down the face.
+function makeMountain() {
+ const ridge=(base,amp,seed,step=3)=>{const out=[];for(let x=-12;x<=312;x+=step){const n=.5*Math.sin(x*.019+seed)+.28*Math.sin(x*.047+seed*2.3)+.14*Math.sin(x*.11+seed*3.7)+.08*Math.sin(x*.29+seed*5.1);out.push([x,Number((base-amp*n-14*Math.exp(-(((x-70)/60)**2))).toFixed(2))])}return out};
+ const farRidge=ridge(30,22,1.3,4),nearRidge=ridge(50,30,4.1,3),base=112;
+ const far=[[-12,base],...farRidge,[312,base]],near=[[-12,base],...nearRidge,[312,base]];
+ const shade=[],gullies=[],highlights=[];let i=1;
+ const extreme=(j,dir)=>{while(j<nearRidge.length-1&&Math.sign(nearRidge[j+1][1]-nearRidge[j][1])===dir)j++;return j};
+ while(i<nearRidge.length-2){
+  if(nearRidge[i][1]<nearRidge[i-1][1]&&nearRidge[i][1]<=nearRidge[i+1][1]){
+   const v=extreme(i,1),p=nearRidge[i],q=nearRidge[v],w=q[0]-p[0];
+   if(w>4){const hq=base-q[1],hp=base-p[1];
+    // a tapering wedge of shade on the slope that faces away from the light
+    const deep=Math.min(hq*.62,w*1.5);
+    shade.push([...nearRidge.slice(i,v+1),[q[0]-w*.08,q[1]+deep*.6],[p[0]+w*.5,Math.max(p[1],q[1])+deep],[p[0]+w*.18,p[1]+Math.min(hp*.32,w*.8)]]);
+    gullies.push([q,[q[0]+w*.04,q[1]+deep*.35],[q[0]-w*.06,q[1]+deep*.65]]);
+    highlights.push([p,[p[0]-w*.1,p[1]+hp*.22],[p[0]-w*.04,p[1]+hp*.4]])}
+   i=Math.max(v,i+1)
+  }else i++
+ }
+ const shrubs=[];for(let k=0;k<40;k++){const x=sceneHash(k*4.3+.7)*300,y=78+sceneHash(k*6.1+.2)*32;if(pointInPolygon([x,y-3],near))shrubs.push([Number(x.toFixed(2)),Number(y.toFixed(2)),Number((1+sceneHash(k*8.9)*1.6).toFixed(2))])}
+ return {far,near,shade,gullies,highlights,shrubs,base}
+}
 function makeWeeklyChannel() {
  const k=CAMERA_K,knots=[[174.5,32],[181,31],[187,33],[192,38],[195,44],[196,50],[200,57],[203,62],[207,66],[212,66.5],[216,62.5],[218,56],[221,50],[223,44],[226,40],[230,37.5],[234,37.5],[238,40],[240,44],[241,49],[246,55],[249,61],[253,65.5],[258,66.5],[262,63],[265,57],[268,51],[272,43],[276,35],[281,28],[288,23]];
- const channel=carvedChannel(catmullRom(knots.map(p=>[p[0],p[1]/k]),5),5,p=>[p[0],p[1]*k]);
+ // The rock top is not level: it rises toward the spring (right, back) and falls
+ // toward the outlet (left, front), so gravity carries the water to the lip.
+ const tilt=(p,weight=1)=>[p[0],p[1]+weight*(WEEKLY_TILT.drop-WEEKLY_TILT.slope*(p[0]-174.5))];
+ const channel=carvedChannel(catmullRom(knots.map(p=>[p[0],p[1]/k]),5),5,p=>tilt([p[0],p[1]*k]));
  // Irregular boulder: a weathered flat top (where W is carved) and faceted sides.
  const plateau=catmullRom([[176.5,27],[181,20],[189,15],[200,12.5],[213,11],[226,9],[241,10],[254,8.5],[267,11],[279,13],[288,18],[294.5,27],[295.5,40],[293,54],[290,66],[283,76],[270,81],[255,83.5],[240,82],[226,83],[212,80],[200,75.5],[193,67],[188.5,56],[184.5,45],[179.5,37.5]],4,true);
  const rock=catmullRom([[175,27],[178,19],[186,13],[197,10],[211,8.5],[224,6],[240,7],[252,5.5],[266,8],[279,10],[289,15],[296,24],[298.5,36],[297,50],[299,66],[297,84],[298,100],[294,112],[284,119],[272,123],[258,121.5],[246,118],[236,113],[224,110],[212,108.5],[200,106],[193,101],[190.5,90],[188,76],[185,62],[181,48],[177.5,37]],4,true);
@@ -202,7 +330,15 @@ function makeWeeklyChannel() {
   {shade:'lit',points:[[179.5,37.5],[184.5,45],[188.5,56],[193,67],[200,75.5],[204,92],[200,106],[193,101],[190.5,90],[188,76],[185,62],[181,48],[177.5,37]]},
   {shade:'mid',points:[[200,75.5],[212,80],[226,83],[240,82],[244,98],[236,113],[224,110],[212,108.5],[200,106],[204,92]]},
   {shade:'shade',points:[[240,82],[255,83.5],[270,81],[283,76],[290,66],[293,54],[295.5,40],[297,50],[299,66],[297,84],[298,100],[294,112],[284,119],[272,123],[258,121.5],[246,118],[236,113],[244,98]]}];
- return {...channel,lip:channel.points[0],spring:channel.points.at(-1),plateau,rock,facets,surface:'rock',drainsFrom:'source'}
+ // Points on the top tilt fully; the rock's foot stays planted on the ground.
+ const lean=p=>tilt(p,Math.max(0,Math.min(1,(112-p[1])/27)));
+ const top=plateau.map(p=>tilt(p)),body=rock.map(lean),faces=facets.map(f=>({...f,points:f.points.map(lean)}));
+ // A rock outcrop at the spring hides where the water comes from. Its edge stops
+ // just past the channel's end, so no quota-bearing water is ever covered.
+ const end=channel.points.at(-1),back=channel.points.at(-6),dl=Math.hypot(end[0]-back[0],end[1]-back[1]),d=[(end[0]-back[0])/dl,(end[1]-back[1])/dl],n=[-d[1],d[0]];
+ const at=(a,b)=>[end[0]+d[0]*a+n[0]*b,end[1]+d[1]*a+n[1]*b];
+ const outcrop=catmullRom([at(1.3,-9),at(1.7,-4.5),at(1.2,0),at(1.7,4.5),at(1.5,9.5),at(5,17),[300,40],[308,46],[308,-10],[232,-10],[236,-2],[248,3.5],[262,4],at(10,-17)],4,true);
+ return {...channel,lip:channel.points[0],spring:end,springDirection:d,plateau:top,rock:body,facets:faces,outcrop,tilt:WEEKLY_TILT,onRock:lean,surface:'rock',drainsFrom:'source'}
 }
 function pointInPolygon(p,poly) {let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])c=!c}return c}
 function distanceToPolygon(p,poly) {let d=Infinity;for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy||1,t=Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/l));d=Math.min(d,Math.hypot(p[0]-a[0]-t*dx,p[1]-a[1]-t*dy))}return d}
@@ -215,14 +351,28 @@ function makeGarden(S,W,rock,ground) {
  [.02,.1,.19,.27,.36,.45,.53,.62,.71,.8,.88,.97].forEach((f,i)=>tryGrass(bank(f,9.5+sceneHash(i)*3,i%3!==2),Number((1+sceneHash(i+9)*.45).toFixed(2))));
  [[34,176,1.1],[56,232,1.2],[250,168,1.15],[284,196,1.25],[236,238,1.35],[272,248,1.05],[150,120,.95],[286,132,1],[214,128,.85]].forEach(([x,y,s])=>tryGrass([x,y],s));
  const stones=[];
+ // Stones that always guard the spot where the bamboo pours into S.
+ [[169.5,148.6,4.6],[149,139.6,3.8],[165,161.4,3.4],[140.5,138.4,2.6]].forEach(([x,y,r],i)=>{const cz=(y-151)/k,footprint=[],outline=[];
+  for(let j=0;j<12;j++){const a=j/12*Math.PI*2,rr=r*(.82+.3*sceneHash(i*41+j+5)),p=[x+Math.cos(a)*rr*1.15,151+(cz+Math.sin(a)*rr)*k];footprint.push(p);outline.push([p[0],p[1]-Math.max(0,-Math.sin(a))*r*1.05*k])}
+  if(!footprint.some(p=>pointInPolygon(p,S.polygon)||distanceToPolygon(p,S.polygon)<.6))stones.push({x,y,r,footprint,outline,source:true})});
  [[.06,1],[.24,0],[.33,1],[.5,0],[.66,1],[.83,0],[.93,1]].forEach(([f,far],i)=>{const r=3.6+sceneHash(i*7.7)*2.6,c=bank(f,7+r*1.15+1.8,!!far),cz=(c[1]-151)/k,footprint=[],outline=[];
   for(let j=0;j<11;j++){const a=j/11*Math.PI*2,rr=r*(.8+.32*sceneHash(i*31+j)),p=[c[0]+Math.cos(a)*rr*1.15,151+(cz+Math.sin(a)*rr)*k];footprint.push(p);outline.push([p[0],p[1]-Math.max(0,-Math.sin(a))*r*.95*k])}
-  if(footprint.some(p=>pointInPolygon(p,S.polygon)||distanceToPolygon(p,S.polygon)<.8||pointInPolygon(p,W.polygon)||!pointInPolygon(p,ground)))return;
+  if(footprint.some(p=>pointInPolygon(p,S.polygon)||distanceToPolygon(p,S.polygon)<.8||pointInPolygon(p,W.polygon)||!pointInPolygon(p,ground))||stones.some(s=>Math.hypot(s.x-c[0],s.y-c[1])<s.r+r+2))return;
   stones.push({x:c[0],y:c[1],r,footprint,outline})});
  const pebbles=[];for(let i=0;pebbles.length<34&&i<500;i++){const p=[20+sceneHash(i*3.1)*276,100+sceneHash(i*5.7)*160];if(blocked(p,1.5)||stones.some(s=>Math.hypot(s.x-p[0],s.y-p[1])<s.r*1.6))continue;pebbles.push([Number(p[0].toFixed(2)),Number(p[1].toFixed(2)),Number((.6+sceneHash(i*9.3)*1.1).toFixed(2))])}
  return {grass,stones,pebbles}
 }
 const BUTTERFLY_PERIOD=30000,BUTTERFLY_VISIT=11000;
+// Where S leaves the picture, its water dissolves into tiny 0/1 digits that drift
+// up and fade. Purely decorative: only while S holds water, never under reduced motion.
+const BINARY_SLOTS=16,BINARY_LIFE=2600,BINARY_COLOURS=['#3d9bff','#8f5bff','#c41ddf','#ff4fae','#ff8a18'];
+function binaryDigit(time,index,sessionFraction) {
+ if(!Number.isFinite(time)||time<0||!(sessionFraction>0))return null;
+ const ch=FLUID_GEOMETRY.channel,n=ch.points.length-1,phase=time+index*BINARY_LIFE/BINARY_SLOTS,cycle=Math.floor(phase/BINARY_LIFE),u=phase/BINARY_LIFE-cycle,h=k=>sceneHash(cycle*7.31+index*3.17+k);
+ if(h(9)>.8)return null;
+ const i=n-1-Math.floor(h(1)*9),side=.2+.6*h(2),start=[ch.left[i][0]+(ch.right[i][0]-ch.left[i][0])*side,ch.left[i][1]+(ch.right[i][1]-ch.left[i][1])*side];
+ return {x:start[0]-(4+12*h(4))*u+1.6*Math.sin(u*6.3+h(5)*6),y:start[1]-(10+16*h(3))*u*(1-.35*u),char:h(6)<.5?'0':'1',opacity:Math.min(1,u/.15)*Math.pow(1-u,1.3),size:4.4+2.4*h(7)*(1-.25*u),colour:BINARY_COLOURS[Math.floor(h(8)*BINARY_COLOURS.length)]}
+}
 // Every 30 s one or two butterflies arrive with an erratic, bobbing flight, rest
 // on a grass tip (slowly opening and closing their wings) and fly away.
 function butterflyFlight(time,index) {
@@ -254,12 +404,13 @@ function rotateFluidPoint(p,angle) {
 }
 function fluidGeometry() {return FLUID_GEOMETRY}
 const FLUID_GEOMETRY=(()=>{
- const weekly=makeWeeklyChannel(),W=weekly.polygon;
+ const weekly=makeWeeklyChannel(),W=weekly.polygon,mountain=makeMountain();
  const channel=makeSessionChannel(),S=channel.polygon;
- const ground=catmullRom([[10,206],[16,168],[38,138],[78,118],[124,104],[160,96],[200,94],[240,90],[280,92],[299,104],[299,226],[284,256],[230,265],[150,265],[70,262],[24,246]],6,true);
+ // The ground runs to every edge of the scene; its far edge meets the mountain foot.
+ const ground=[[-40,104],[40,98],[120,94],[200,90],[260,86],[340,88],[340,300],[-40,300]];
  const garden=makeGarden(channel,weekly,weekly.rock,ground);
  const bamboo=[[148,120],[254,120],[254,152],[119,152]].map(bambooPoint),rest=bamboo.map(p=>rotateFluidPoint(p,45));
- return {W,S,channel,weekly,rock:weekly.rock,plateau:weekly.plateau,ground,...garden,camera:{elevation:45,k:CAMERA_K},bamboo,capacity:polygonArea(polygonBelow(rest,rotateFluidPoint(bambooPoint([113,158]),45)[1]))}
+ return {W,S,channel,weekly,mountain,rock:weekly.rock,plateau:weekly.plateau,outcrop:weekly.outcrop,ground,...garden,camera:{elevation:45,k:CAMERA_K},bamboo,capacity:polygonArea(polygonBelow(rest,rotateFluidPoint(bambooPoint([113,158]),45)[1]))}
 })();
 function fluidPath(p) {return p.length?'M'+p.map(a=>a.map(n=>Number(n.toFixed(3))).join(' ')).join('L')+'Z':''}
 function dumpFluidState(u) {
@@ -359,6 +510,11 @@ function applyFluidFrame(svg,frame) {
  const internal=svg.querySelector('[data-fluid-internal]');if(internal)internal.style.opacity=String(frame.jet.opacity*.65);
  const inlet=svg.querySelector('[data-bamboo-inflow]');if(inlet){inlet.style.opacity=frame.flowing?'.9':'0';inlet.setAttribute('data-bamboo-flow',frame.flowing?'running':'stopped')}
  const splash=svg.querySelector('[data-fluid-splash]');if(splash){const [x,y]=FLUID_GEOMETRY.channel.inlet,o=frame.jet.opacity,r=2.5+4.5*((frame.time%650)/650),ry=r*CAMERA_K*.55;splash.setAttribute('d',`M${round(x-r)} ${y}A${round(r)} ${round(ry)} 0 1 0 ${round(x+r)} ${y}A${round(r)} ${round(ry)} 0 1 0 ${round(x-r)} ${y}`);splash.style.opacity=String(o*.7)}
+ for(const node of svg.querySelectorAll('[data-binary-digit]')){
+  const d=frame.motion?binaryDigit(frame.time,Number(node.getAttribute('data-binary-digit')),frame.S.fraction):null;
+  node.style.opacity=d?String(Number(d.opacity.toFixed(3))):'0';
+  if(d){node.setAttribute('x',round(d.x));node.setAttribute('y',round(d.y));node.setAttribute('font-size',round(d.size));node.setAttribute('fill',d.colour);if(node.textContent!==d.char)node.textContent=d.char}
+ }
  for(const node of svg.querySelectorAll('[data-butterfly]')){
   const b=frame.motion?butterflyFlight(frame.time,Number(node.getAttribute('data-butterfly'))):null;
   node.setAttribute('data-butterfly-state',b?(b.perched?'resting':'flying'):'away');node.style.opacity=b?String(Number(b.opacity.toFixed(3))):'0';
@@ -394,9 +550,10 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
     name==='S'?jsx('path',{'data-fluid-splash':'S',fill:'none',stroke:white,strokeWidth:.8,style:{opacity:0}}):null
    ]}),
    jsx('path',{d:fluidPath(g[name]),fill:'none',stroke:onRock?'#d7d0e4':'#b39b7c',strokeOpacity:onRock?.3:.32,strokeWidth:.5,vectorEffect:'non-scaling-stroke'}),
-   value===null?jsx('text',{x:onRock?230:mid[0],y:onRock?30:mid[1]-6,textAnchor:'middle',fontFamily:'system-ui',fontSize:onRock?16:13.5,fontWeight:650,fill:muted,children:'؟'}):null
+   value===null?jsx('text',{x:onRock?230:mid[0],y:onRock?g.weekly.onRock([230,30])[1]:mid[1]-6,textAnchor:'middle',fontFamily:'system-ui',fontSize:onRock?16:13.5,fontWeight:650,fill:muted,children:usageText().unknownMark}):null
   ]})};
  const moss=(cx,cy,rx,ry,key)=>jsx('ellipse',{cx,cy,rx,ry,fill:paint('moss')},key);
+ const onRock=g.weekly.onRock,lines=list=>list.map(l=>'M'+l.map(p=>onRock(p).map(n=>Number(n.toFixed(2))).join(' ')).join('L')).join('');
  const groundNode=jsxs('g',{'data-ground':'oblique-45',children:[
   jsx('path',{'data-ground-plane':true,d:fluidPath(g.ground),fill:paint('earth'),mask:`url(#${uid('ground-fade')})`,filter:paint('grain')}),
   jsx('path',{d:fluidPath(g.S),fill:'none',stroke:'#130e0a',strokeOpacity:.6,strokeWidth:7,strokeLinejoin:'round',filter:paint('soft')}),
@@ -409,13 +566,12 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
   jsxs('g',{filter:paint('grain'),children:[
    jsx('path',{'data-rock-body':true,d:fluidPath(g.rock),fill:paint('rock-face'),stroke:'#110f15',strokeOpacity:.6,strokeWidth:.6,strokeLinejoin:'round',vectorEffect:'non-scaling-stroke'}),
    ...g.weekly.facets.map(f=>jsx('path',{'data-rock-facet':f.shade,d:fluidPath(f.points),fill:f.shade==='lit'?'#8a8494':f.shade==='mid'?'#4a4654':'#1d1b22',fillOpacity:f.shade==='lit'?.45:.5,stroke:'#0c0b10',strokeOpacity:.35,strokeWidth:.5,strokeLinejoin:'round'},f.shade)),
-   jsx('path',{d:'M214 99q10 2 20 -2M262 109q12 1 24 -4M291 84q-3 12 0 24M232 92q-4 9 0 17M268 92q5 8 2 18',fill:'none',stroke:'#0d0b10',strokeOpacity:.45,strokeWidth:.7,strokeLinecap:'round'}),
-   jsx('path',{d:'M201 88q6 -2 11 0M246 97q7 1 13 -1M272 101q6 1 10 -2',fill:'none',stroke:'#cfc8dc',strokeOpacity:.14,strokeWidth:.9,strokeLinecap:'round'}),
+   jsx('path',{d:lines([[[214,99],[224,101],[234,97]],[[262,109],[274,110],[286,105]],[[291,84],[288,96],[291,108]],[[232,92],[228,101],[232,109]],[[268,92],[273,100],[270,110]]]),fill:'none',stroke:'#0d0b10',strokeOpacity:.45,strokeWidth:.7,strokeLinecap:'round',strokeLinejoin:'round'}),
+   jsx('path',{d:lines([[[201,88],[207,86],[212,88]],[[246,97],[253,98],[259,96]],[[272,101],[278,102],[282,99]]]),fill:'none',stroke:'#cfc8dc',strokeOpacity:.14,strokeWidth:.9,strokeLinecap:'round'}),
    jsx('path',{d:fluidPath(g.plateau.map(p=>[p[0],p[1]+2.4])),fill:'#0b0a0e',fillOpacity:.5}),
    jsx('path',{'data-rock-top':true,d:fluidPath(g.plateau),fill:paint('rock-top')}),
    jsx('path',{d:fluidPath(g.plateau),fill:'none',stroke:'#ece6f6',strokeOpacity:.26,strokeWidth:.7,vectorEffect:'non-scaling-stroke'}),
-   moss(185,19,6,2.2,'m1'),moss(266,79,10,2.4,'m2'),moss(294.5,45,2.6,7,'m3'),moss(206,13.5,7,1.9,'m4'),moss(282,118,11,2.8,'m5'),moss(214,105.5,8,2.2,'m6'),
-   jsx('ellipse',{'data-spring':'W',cx:291.5,cy:21.2,rx:3.6,ry:1.9,fill:'#08070b'})
+   ...[[185,19,6,2.2],[266,79,10,2.4],[294.5,45,2.6,7],[206,13.5,7,1.9],[282,118,11,2.8],[214,105.5,8,2.2]].map(([x,y,rx,ry],i)=>{const p=onRock([x,y]);return moss(p[0],p[1],rx,ry,`rock-moss-${i}`)})
   ]})
  ]});
  const stoneNode=(s,i)=>jsxs('g',{'data-stone':i,children:[
@@ -439,9 +595,34 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
   jsx('path',{d:'M-.2 -2.9Q-1 -5.4 -1.9 -6.6M.2 -2.9Q1 -5.4 1.9 -6.6',fill:'none',stroke:'#1c1510',strokeWidth:.35,strokeLinecap:'round'}),
   jsx('circle',{cx:-1.9,cy:-6.6,r:.38,fill:'#1c1510'}),jsx('circle',{cx:1.9,cy:-6.6,r:.38,fill:'#1c1510'})
  ]})},`butterfly-${i}`));
- const lip=g.weekly.lip,mouth=bambooPoint([144.4,98]),from=g.weekly.points[3],feet=163.7;
+ const lip=g.weekly.lip,mouth=bambooPoint([144.4,98]),from=g.weekly.points[3],feet=163.7,mt=g.mountain;
+ const sprAngle=Math.atan2(g.weekly.springDirection[1],g.weekly.springDirection[0])*180/Math.PI,spr=g.weekly.spring;
+ const backdrop=jsxs('g',{'data-mountain':'backdrop',children:[
+  jsx('rect',{x:-10,y:-10,width:320,height:130,fill:paint('sky')}),
+  jsx('path',{'data-mountain-range':'far',d:fluidPath(mt.far),fill:paint('mountain-far')}),
+  jsxs('g',{filter:paint('grain-dark'),children:[
+   jsx('path',{'data-mountain-body':true,d:fluidPath(mt.near),fill:paint('mountain'),stroke:'#0e0c13',strokeOpacity:.5,strokeWidth:.5,strokeLinejoin:'round'}),
+   jsx('g',{clipPath:paint('mountain-clip'),children:[
+    ...mt.shade.map((p,i)=>jsx('path',{d:fluidPath(p),fill:'#0d0b13',fillOpacity:.42},`mountain-shade-${i}`)),
+    jsx('path',{d:mt.gullies.map(r=>'M'+r.map(p=>p.join(' ')).join('L')).join(''),fill:'none',stroke:'#08070c',strokeOpacity:.55,strokeWidth:1.1,strokeLinecap:'round',strokeLinejoin:'round'}),
+    jsx('path',{d:mt.highlights.map(r=>'M'+r.map(p=>p.join(' ')).join('L')).join(''),fill:'none',stroke:'#e2dcef',strokeOpacity:.13,strokeWidth:.9,strokeLinecap:'round',strokeLinejoin:'round'})
+   ]}),
+   ...mt.shrubs.map(([x,y,r],i)=>jsx('ellipse',{cx:x,cy:y,rx:r,ry:r*.7,fill:i%2?'#26402a':'#2f4a2b',fillOpacity:.85},`shrub-${i}`))
+  ]}),
+  jsx('rect',{x:-10,y:72,width:320,height:40,fill:paint('mist')})
+ ]});
+ const outcrop=jsxs('g',{'data-spring-outcrop':true,children:[
+  jsx('path',{d:fluidPath(g.outcrop.map(p=>[p[0]+1.2,p[1]+1.6])),fill:'#000',fillOpacity:.45,filter:paint('soft')}),
+  jsxs('g',{filter:paint('grain'),children:[
+   jsx('path',{'data-outcrop-body':true,d:fluidPath(g.outcrop),fill:paint('rock-face'),stroke:'#110f15',strokeOpacity:.6,strokeWidth:.6,strokeLinejoin:'round'}),
+   jsx('path',{'data-outcrop-top':true,d:fluidPath(g.outcrop.map(p=>[p[0],p[1]-3.5]).filter((p,i,a)=>p[1]<g.weekly.spring[1]+2)),fill:paint('rock-top'),fillOpacity:.75}),
+   jsx('path',{d:fluidPath(g.outcrop),fill:'none',stroke:'#e9e3f3',strokeOpacity:.2,strokeWidth:.7,vectorEffect:'non-scaling-stroke'})
+  ]}),
+  jsx('ellipse',{'data-spring':'W',cx:spr[0]+g.weekly.springDirection[0]*2.2,cy:spr[1]+g.weekly.springDirection[1]*2.2,rx:3.2,ry:7.5,transform:`rotate(${sprAngle} ${spr[0]+g.weekly.springDirection[0]*2.2} ${spr[1]+g.weekly.springDirection[1]*2.2})`,fill:paint('crevice')})
+ ]});
+ const digits=jsx('g',{'data-binary-stream':'S',filter:paint('liquid-glow'),children:Array.from({length:BINARY_SLOTS},(_,i)=>jsx('text',{'data-binary-digit':i,x:0,y:0,textAnchor:'middle',fontFamily:'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',fontWeight:700,fontSize:3.6,fill:'#3d9bff',style:{opacity:0},children:'0'},`digit-${i}`))});
  const decor=[...g.stones.map((s,i)=>({y:s.y,node:stoneNode(s,i)})),...g.grass.map((t,i)=>({y:t[1],node:tuftNode(t,i)}))].sort((a,b)=>a.y-b.y);
- return jsxs('svg',{'data-bamboo-scene':expanded?'expanded':'compact','data-material':'glass-bamboo','data-colour-style':'apple-reference-v10','data-scene':'rock-garden-v13','data-camera':'oblique-45','data-bamboo-scale':.44,'data-weekly-shape':'w-watercourse-rock','data-session-shape':'s-watercourse','data-fluid-engine':'gravity-volume-v7',
+ return jsxs('svg',{'data-bamboo-scene':expanded?'expanded':'compact','data-material':'glass-bamboo','data-colour-style':'apple-reference-v10','data-scene':'mountain-i18n-v14','data-camera':'oblique-45','data-bamboo-scale':.44,'data-weekly-shape':'w-watercourse-rock','data-session-shape':'s-watercourse','data-fluid-engine':'gravity-volume-v7',
   'data-flow-from':'W','data-flow-via':'cycle','data-flow-to':'S','data-outlet-position':'bottom','data-source-pipe':'none',
   'data-cycle-state':m.tipped?'dumping':cycle.phase||'unknown','data-cycle-progress':cycle.progress,'data-cycle-reset':cycle.resetMs,'data-physical-angle':frame.angle,
   viewBox:'0 0 300 266',width:expanded?'100%':68,height:expanded?236:20,'aria-hidden':true,style:{display:'block',flexShrink:0,overflow:'hidden'},children:[
@@ -465,6 +646,20 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
     jsxs('linearGradient',{id:uid('liquid'),'data-siri-gradient':true,x1:'0%',y1:'0%',x2:'100%',y2:'65%',children:stops}),
     jsxs('linearGradient',{id:uid('glass-body'),x1:'0%',y1:'0%',x2:'0%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:tint('.95','.03','155'),stopOpacity:.25}),jsx('stop',{offset:'25%',stopColor:tint('.80','.05','160'),stopOpacity:.045}),jsx('stop',{offset:'67%',stopColor:tint('.8','.04','185'),stopOpacity:.025}),jsx('stop',{offset:'100%',stopColor:tint('.75','.06','170'),stopOpacity:.2})]}),
     jsxs('linearGradient',{id:uid('glass-edge'),x1:'0%',y1:'0%',x2:'100%',y2:'90%',children:[jsx('stop',{offset:'0%',stopColor:white,stopOpacity:.55}),jsx('stop',{offset:'35%',stopColor:tint('.8','.07','160'),stopOpacity:.5}),jsx('stop',{offset:'70%',stopColor:white,stopOpacity:.4}),jsx('stop',{offset:'100%',stopColor:tint('.65','.06','175'),stopOpacity:.45})]}),
+    jsx('clipPath',{id:uid('mountain-clip'),children:jsx('path',{d:fluidPath(g.mountain.near)})}),
+    jsxs('filter',{id:uid('grain-dark'),filterUnits:'userSpaceOnUse',x:-20,y:-20,width:340,height:306,children:[
+     jsx('feTurbulence',{type:'fractalNoise',baseFrequency:1.1,numOctaves:2,seed:5,result:'noise'}),
+     jsx('feColorMatrix',{in:'noise',type:'matrix',values:'0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.1 0 0 0 -.5',result:'dark'}),
+     jsx('feComposite',{in:'dark',in2:'SourceGraphic',operator:'in',result:'dark-in'}),
+     jsxs('feMerge',{children:[jsx('feMergeNode',{in:'SourceGraphic'}),jsx('feMergeNode',{in:'dark-in'})]})
+    ]}),
+    jsxs('radialGradient',{id:uid('crevice'),children:[jsx('stop',{offset:'0%',stopColor:'#020103',stopOpacity:1}),jsx('stop',{offset:'70%',stopColor:'#050408',stopOpacity:.75}),jsx('stop',{offset:'100%',stopColor:'#050408',stopOpacity:0})]}),
+    jsx('clipPath',{id:uid('frame'),children:jsx('rect',{x:0,y:0,width:300,height:266,rx:16})}),
+    gradient('sky',[['0%','#120f22'],['70%','#2a2340'],['100%','#3b3150']]),
+    gradient('mountain-far',[['0%','#6f6884',1],['100%','#4a4560',1]]),
+    gradient('mountain',[['0%','#58536a'],['55%','#3a3647'],['100%','#262330']],{x2:'25%'}),
+    gradient('mist',[['0%','#cfc8e6',0],['70%','#cfc8e6',.2],['100%','#cfc8e6',.08]]),
+    jsxs('radialGradient',{id:uid('vignette'),cx:'50%',cy:'48%',r:'72%',children:[jsx('stop',{offset:'60%',stopColor:'#000',stopOpacity:0}),jsx('stop',{offset:'100%',stopColor:'#000',stopOpacity:.42})]}),
     gradient('earth',[['0%','#544a3f'],['45%','#3f372e'],['100%','#28221b']]),
     gradient('rock-face',[['0%','#625d6c'],['45%','#403c48'],['100%','#24212a']],{x2:'30%'}),
     gradient('rock-top',[['0%','#a29dab'],['50%','#7d7887'],['100%','#5f5b69']],{x2:'100%'}),
@@ -477,12 +672,15 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
     jsx('clipPath',{id:uid('weekly-water'),children:jsx('path',{'data-weekly-flow-clip':true,d:fillOf(frame.W).fill})}),
     jsx('clipPath',{id:uid('cavity'),children:jsx('polygon',{'data-fluid-cavity':true,points:frame.bamboo.polygon.map(p=>p.join(',')).join(' ')})})
    ]}),
+   jsxs('g',{'data-scene-frame':true,clipPath:paint('frame'),children:[
+   backdrop,
    groundNode,
    rock,
    tank('S',sessionLeft),
    tank('W',weeklyLeft),
-   !cycle.artOnly?jsx('text',{'data-weekly-remaining':weeklyLeft,'data-text-state':Number.isFinite(weeklyLeft)?'actual':'unknown',x:76,y:54,textAnchor:'middle',fontFamily:'system-ui',fontSize:16,fontWeight:650,fill:white,children:Number.isFinite(weeklyLeft)?`${weeklyLeft.toLocaleString('en-US',{maximumFractionDigits:1})}%`:'—'}):null,
-   !cycle.artOnly?jsx('text',{x:76,y:71,textAnchor:'middle',fontFamily:'system-ui',fontSize:9.5,fill:muted,children:Number.isFinite(weeklyLeft)?'متبقٍ أسبوعيًا':'الحصة غير متاحة'}):null,
+   outcrop,
+   !cycle.artOnly?jsx('text',{'data-weekly-remaining':weeklyLeft,'data-text-state':Number.isFinite(weeklyLeft)?'actual':'unknown',x:76,y:54,textAnchor:'middle',fontFamily:'system-ui',fontSize:16,fontWeight:650,fill:white,stroke:'#0b0a10',strokeOpacity:.7,strokeWidth:3,paintOrder:'stroke',children:Number.isFinite(weeklyLeft)?`${weeklyLeft.toLocaleString('en-US',{maximumFractionDigits:1})}%`:'—'}):null,
+   !cycle.artOnly?jsx('text',{x:76,y:71,textAnchor:'middle',fontFamily:'system-ui',fontSize:9.5,fill:muted,children:Number.isFinite(weeklyLeft)?usageText().weeklyLeft:usageText().quotaUnavailable}):null,
    ...decor.filter(d=>d.y<feet).map(d=>d.node),
    jsx('path',{d:'M185 143L175 199M197 143L209 199',style:{transform:'scale(0.44)',transformOrigin:'191px 136px'},fill:'none',stroke:paint('glass-edge'),strokeWidth:4,strokeLinecap:'round'}),
    liquid('cycle',frame.bamboo),
@@ -499,13 +697,17 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
      jsx('path',{d:'M143 116C134 121 119 142 115 154',fill:'none',stroke:white,strokeOpacity:.8,strokeWidth:.8}),
      jsx('path',{d:'M258 115Q269 136 258 157',fill:'none',stroke:white,strokeOpacity:.6,strokeWidth:1})
    ]},String(cycle.eventId||'idle')),
-   frame.bamboo.fraction===null?jsx('text',{'data-bamboo-unknown':'cycle',x:bambooPoint([212,157])[0],y:bambooPoint([212,157])[1],textAnchor:'middle',fontSize:7,fontWeight:650,fill:muted,children:'؟'}):null,
+   frame.bamboo.fraction===null?jsx('text',{'data-bamboo-unknown':'cycle',x:bambooPoint([212,157])[0],y:bambooPoint([212,157])[1],textAnchor:'middle',fontSize:7,fontWeight:650,fill:muted,children:usageText().unknownMark}):null,
    jsx('circle',{cx:191,cy:136,r:4.2*.44,fill:paint('glass-body'),stroke:paint('glass-edge'),strokeWidth:1}),
    jsx('circle',{cx:bambooPoint([190.3,135.3])[0],cy:bambooPoint([190.3,135.3])[1],r:1.4*.44,fill:white,fillOpacity:.65}),
    jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-inflow':'W','data-bamboo-flow':frame.flowing?'running':'stopped',d:`M${from.join(' ')}L${lip.join(' ')}Q${(lip[0]+mouth[0])/2} ${lip[1]} ${mouth.join(' ')}`,fill:'none',stroke:paint('liquid'),strokeWidth:2.4,strokeLinecap:'round',strokeDasharray:'7 2',className:'usage-bamboo-flow',style:{opacity:frame.flowing?.9:0,animation:`usage-bamboo-flow 1.3s linear infinite, ${rainbow}`}})}),
    ...decor.filter(d=>d.y>=feet).map(d=>d.node),
    jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-pour':'S',d:fluidJetPath(frame.jet),fill:paint('liquid'),style:{opacity:frame.jet.opacity,animation:rainbow}})}),
-   ...butterflies
+   digits,
+   ...butterflies,
+   jsx('rect',{'data-vignette':true,x:0,y:0,width:300,height:266,fill:paint('vignette'),pointerEvents:'none'})
+   ]}),
+   jsx('rect',{x:.5,y:.5,width:299,height:265,rx:16,fill:'none',stroke:'#ffffff',strokeOpacity:.12,strokeWidth:1,vectorEffect:'non-scaling-stroke'})
   ]})
 }
 function startFluidPhysics(svg,read) {
@@ -535,8 +737,9 @@ function FountainView({provider,cycle,model='',dock=false,artOnly=false}) {
 }
 function UsagePane(props={}) {
  const shared=useValue(usageView)
+ const lang=useUsageLanguage(),t=usageText(lang),languagePreference=useValue(languageAtom)
  const snapshot=props.snapshot||shared
- if(!snapshot)return jsx('div',{dir:'rtl',style:{padding:12},children:'جارٍ الاتصال ببيانات الموديل…'})
+ if(!snapshot)return jsx('div',{dir:t.dir,style:{padding:12},children:t.connecting})
  const {usage,gateway,liveModel,sameProfile,query,data,provider,rawProvider,cycle,selectedAccount,onSelectAccount}=snapshot
  const now=cycle.now
  const number = n=>typeof n==='number' && Number.isFinite(n)?n.toLocaleString('en-US'):'—'
@@ -546,37 +749,38 @@ function UsagePane(props={}) {
   const left=remaining(window)
   const expired=window.resets_at && Date.parse(window.resets_at)<=now
   cards.push(jsxs('section',{style:{borderTop:'1px solid var(--ui-stroke-secondary)',paddingTop:9,marginTop:9},children:[
-   jsxs('div',{style:{display:'flex',justifyContent:'space-between',gap:8},children:[jsx('strong',{children:window.label||'حصة الحساب'}),jsx('span',{children:left===null?'النسبة غير متاحة':`${number(left)}% متبقٍ`})]}),
-   left!==null?jsx('progress',{max:100,value:left,'aria-label':`المتبقي ${left}%`,style:{width:'100%',height:6,accentColor:'var(--ui-accent)',marginTop:7}}):null,
-   jsx('div',{style:textStyle,children:left===null?'':`المستهلك: ${number(Math.min(100,Math.max(0,window.used_percent)))}%`}),
-   jsx('div',{children:`التجدد: ${countdown(window.resets_at,now)}`}),
-   window.resets_at && Number.isFinite(Date.parse(window.resets_at))?jsx('div',{style:textStyle,children:new Date(window.resets_at).toLocaleString('ar-MA')}):null,
-   expired?jsx('div',{style:textStyle,children:'النسبة المعروضة آخر قراءة؛ لا نفترض تجدد الرصيد حتى يؤكده المزوّد.'}):null
+   jsxs('div',{style:{display:'flex',justifyContent:'space-between',gap:8},children:[jsx('strong',{children:window.label||t.accountQuota}),jsx('span',{children:left===null?t.pctUnavailable:t.left(number(left))})]}),
+   left!==null?jsx('progress',{max:100,value:left,'aria-label':t.remainingAria(left),style:{width:'100%',height:6,accentColor:'var(--ui-accent)',marginTop:7}}):null,
+   jsx('div',{style:textStyle,children:left===null?'':t.used(number(Math.min(100,Math.max(0,window.used_percent))))}),
+   jsx('div',{children:t.renewal(countdown(window.resets_at,now,lang))}),
+   window.resets_at && Number.isFinite(Date.parse(window.resets_at))?jsx('div',{style:textStyle,children:new Date(window.resets_at).toLocaleString(t.dateLocale)}):null,
+   expired?jsx('div',{style:textStyle,children:t.lastReading}):null
   ]},key))
  }
  for(const w of (rawProvider||provider)?.usage?.windows||[]) addWindow(w,`single-${cards.length}`)
  for(const [i,account] of ((rawProvider||provider)?.usage?.accounts||[]).entries()) {
-  cards.push(jsx('div',{style:{marginTop:8,fontWeight:600},children:`${account.label||`الحساب ${i+1}`} — ${account.state==='limited'?'بلغ الحد':account.state==='ready'?'متاح':account.state==='unavailable'?'غير متاح':'بيانات غير متاحة'}`},`account-${i}`))
+  cards.push(jsx('div',{style:{marginTop:8,fontWeight:600},children:`${account.label||t.accountN(i+1)} — ${t.states[account.state]||t.states.unknown}`},`account-${i}`))
   for(const w of account.windows||[]) addWindow(w,`account-${i}-${cards.length}`)
  }
- return jsxs('div',{'data-usage-meter':'true',dir:'rtl',style:{padding:12,height:'100%',overflow:'auto',fontSize:13,lineHeight:1.7,color:'var(--ui-text-primary)'},children:[
+ return jsxs('div',{'data-usage-meter':'true','data-usage-language':lang,lang,dir:t.dir,style:{padding:12,height:'100%',overflow:'auto',fontSize:13,lineHeight:1.7,color:'var(--ui-text-primary)'},children:[
   jsx('div',{dir:'ltr',style:{marginBottom:8},children:jsx(FountainView,{provider,cycle,model:data?.model||liveModel||''})}),
-  jsx('div',{'data-cycle-caption':true,style:{fontSize:12,color:'var(--ui-text-secondary)',marginBottom:10},children:cycle.dumping?'تجددت الحصة — تُسكب القصبة الآن في S':cycle.phase==='awaiting'?'القصبة ممتلئة — بانتظار تأكيد التجدد من المزوّد':cycle.progress===null?'موعد تجدد القصبة غير متاح':`امتلاء قصبة التجدد: ${Math.floor(cycle.progress*100)}% · المتبقي: ${countdown(new Date(cycle.resetMs).toISOString(),now)}`}),
-  jsx('div',{style:{fontWeight:650},children:'الموديل والاستهلاك'}),
-  (rawProvider?.usage?.accounts||[]).length>1?jsx('select',{'aria-label':'حساب مصدر بيانات الحصة',value:selectedAccount?.provider===rawProvider.slug?selectedAccount.id:'',onChange:e=>onSelectAccount?.(e.target.value),style:{maxWidth:'100%',color:'var(--ui-text-primary)',background:'var(--ui-bg-elevated)'},children:[jsx('option',{value:'',children:'تلقائي: الحساب الذي يوفّر بيانات الحصة'}),...rawProvider.usage.accounts.map(a=>jsx('option',{value:a.id,children:`${a.label||a.id} · ${a.id}`},a.id))]}):null,
-  jsx('div',{dir:'ltr',style:{overflowWrap:'anywhere',fontWeight:600},children:data?.model||liveModel||'بانتظار اختيار الموديل'}),
-  jsx('div',{dir:'ltr',style:textStyle,children:data?.provider||'بانتظار بيانات المزوّد'}),
-  jsx('div',{style:{marginTop:10,fontWeight:600},children:'توكنز الجلسة الحالية'}),
-  jsx('div',{children:`الإجمالي: ${number(usage?.total)}`}),
-  jsx('div',{style:textStyle,children:`إدخال: ${number(usage?.input)} · إخراج: ${number(usage?.output)}`}),
-  usage?.context_max?jsx('div',{style:textStyle,children:`السياق: ${number(usage.context_used)} / ${number(usage.context_max)} — ليس رصيد الاشتراك`}):null,
-  jsx('div',{style:{marginTop:10,fontWeight:600},children:'حصة الحساب ومواعيد التجدد'}),
+  jsx('div',{'data-cycle-caption':true,style:{fontSize:12,color:'var(--ui-text-secondary)',marginBottom:10},children:cycle.dumping?t.captionDumping:cycle.phase==='awaiting'?t.captionAwaiting:cycle.progress===null?t.captionNoReset:t.captionFilling(Math.floor(cycle.progress*100),countdown(new Date(cycle.resetMs).toISOString(),now,lang))}),
+  jsxs('label',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:8,fontSize:12,color:'var(--ui-text-secondary)'},children:[t.language,jsx('select',{'data-usage-language-select':true,'aria-label':t.language,value:USAGE_LANGUAGES.includes(languagePreference)?languagePreference:'auto',onChange:e=>chooseUsageLanguage(e.target.value),style:{color:'var(--ui-text-primary)',background:'var(--ui-bg-elevated)'},children:[jsx('option',{value:'auto',children:t.autoLanguage},'auto'),...USAGE_LANGUAGES.map(code=>jsx('option',{value:code,lang:code,children:USAGE_ENDONYMS[code]},code))]})]}),
+  jsx('div',{style:{fontWeight:650},children:t.modelUsage}),
+  (rawProvider?.usage?.accounts||[]).length>1?jsx('select',{'aria-label':t.sourceAccount,value:selectedAccount?.provider===rawProvider.slug?selectedAccount.id:'',onChange:e=>onSelectAccount?.(e.target.value),style:{maxWidth:'100%',color:'var(--ui-text-primary)',background:'var(--ui-bg-elevated)'},children:[jsx('option',{value:'',children:t.autoAccount}),...rawProvider.usage.accounts.map(a=>jsx('option',{value:a.id,children:`${a.label||a.id} · ${a.id}`},a.id))]}):null,
+  jsx('div',{dir:'ltr',style:{overflowWrap:'anywhere',fontWeight:600},children:data?.model||liveModel||t.waitingModel}),
+  jsx('div',{dir:'ltr',style:textStyle,children:data?.provider||t.waitingProvider}),
+  jsx('div',{style:{marginTop:10,fontWeight:600},children:t.sessionTokens}),
+  jsx('div',{children:t.total(number(usage?.total))}),
+  jsx('div',{style:textStyle,children:t.inout(number(usage?.input),number(usage?.output))}),
+  usage?.context_max?jsx('div',{style:textStyle,children:t.context(number(usage.context_used),number(usage.context_max))}):null,
+  jsx('div',{style:{marginTop:10,fontWeight:600},children:t.quotaHeading}),
   ...cards,
-  !cards.length?jsx('div',{style:textStyle,children:!sameProfile?'الحساب المعروض يتبع اتصالًا آخر؛ لا نعرض رصيد اتصال مختلف.':query.isPending?'جارٍ قراءة حصة الحساب…':query.isError?'تعذّرت قراءة حصة الحساب؛ اضغط تحديث للمحاولة.':quotaUnavailableReason(data?.provider||provider?.slug,provider)}):null,
-  jsx('p',{style:{...textStyle,marginTop:10},children:'W هو الرصيد الأسبوعي، وS هو الرصيد المتبقي للحصة الحالية وينخفض مع الاستهلاك. القصبة بينهما تمثل الوقت المنقضي حتى التجدد الفعلي، وليس مقدار الرصيد. تمتلئ ثم تسكب دفعة واحدة بعد تأكيد التجدد من المزوّد؛ التدفق رسم توضيحي وليس تحويلًا حقيقيًا للحصة. حصة الحساب قد تكون مشتركة بين الموديلات، والنسبة ليست عدد توكنز.'}),
-  query.isError && cards.length?jsx('div',{style:textStyle,children:'فشل آخر تحديث؛ المعروض آخر قراءة متاحة.'}):null,
-  jsx('button',{type:'button',onClick:()=>query.refetch(),disabled:query.isFetching||!sameProfile||gateway!=='open',style:{border:'1px solid var(--ui-stroke-secondary)',borderRadius:6,padding:'3px 10px',color:'var(--ui-text-primary)',background:'transparent'},children:query.isFetching?'جارٍ التحديث…':'تحديث'}),
-  jsx('div',{style:textStyle,children:'تحديث تلقائي كل دقيقة؛ إعادة محاولة سريعة عند التشغيل أو انقطاع الاتصال.'})
+  !cards.length?jsx('div',{style:textStyle,children:!sameProfile?t.otherProfile:query.isPending?t.readingQuota:query.isError?t.readFailed:quotaUnavailableReason(data?.provider||provider?.slug,provider,lang)}):null,
+  jsx('p',{style:{...textStyle,marginTop:10},children:t.explanation}),
+  query.isError && cards.length?jsx('div',{style:textStyle,children:t.staleAfterFail}):null,
+  jsx('button',{type:'button',onClick:()=>query.refetch(),disabled:query.isFetching||!sameProfile||gateway!=='open',style:{border:'1px solid var(--ui-stroke-secondary)',borderRadius:6,padding:'3px 10px',color:'var(--ui-text-primary)',background:'transparent'},children:query.isFetching?t.refreshing:t.refresh}),
+  jsx('div',{style:textStyle,children:t.autoRefresh})
  ]})
 }
 function clampFloatingRect(rect={},viewport={width:1024,height:768}) {
@@ -631,6 +835,7 @@ function observeNativeSurfaces(node) {
  return()=>{disposed=true;observer?.disconnect();cancelAnimationFrame(raf);window.removeEventListener('resize',schedule);window.removeEventListener('scroll',schedule,true);document.removeEventListener('transitionend',schedule,true)};
 }
 function UsageCorner() {
+ const lang=useUsageLanguage(),t=usageText(lang)
  const [open,setOpen]=useState(false)
  const [hover,setHover]=useState(false)
  const [geometry,setGeometry]=useState(initialFloatingRect)
@@ -643,7 +848,7 @@ function UsageCorner() {
  useEffect(()=>{usageView.set({...source,cycle,selectedAccount,onSelectAccount:id=>setSelectedAccount({provider:rawProvider?.slug,id})})})
  useEffect(()=>()=>usageView.set(null),[])
  useEffect(()=>observeNativeSurfaces(layerNode.current),[])
- useEffect(()=>{try{widgetStorage?.set('floating-art-v1',geometryRef.current);widgetStorage?.set('fluid-engine-v7',true);widgetStorage?.set('proportions-v8',true);widgetStorage?.set('siri-neon-v9',true);widgetStorage?.set('apple-reference-v10',true);widgetStorage?.set('s-watercourse-v11',true);widgetStorage?.set('rock-garden-v12',true);widgetStorage?.set('rock-garden-v13',true)}catch{}},[])
+ useEffect(()=>{try{widgetStorage?.set('floating-art-v1',geometryRef.current);widgetStorage?.set('fluid-engine-v7',true);widgetStorage?.set('proportions-v8',true);widgetStorage?.set('siri-neon-v9',true);widgetStorage?.set('apple-reference-v10',true);widgetStorage?.set('s-watercourse-v11',true);widgetStorage?.set('rock-garden-v12',true);widgetStorage?.set('rock-garden-v13',true);widgetStorage?.set('mountain-i18n-v14',true)}catch{}},[])
  useEffect(()=>{if(!open)return;const key=e=>{if(e.key==='Escape')setOpen(false)};document.addEventListener('keydown',key);return()=>document.removeEventListener('keydown',key)},[open])
  useEffect(()=>{const fit=()=>{const next=clampFloatingRect(geometryRef.current,floatingViewport());geometryRef.current=next;setGeometry(next)};window.addEventListener('resize',fit);return()=>window.removeEventListener('resize',fit)},[])
  function move(next,persist=false) {
@@ -667,22 +872,24 @@ function UsageCorner() {
  }
  const style={position:'fixed',zIndex:1,left:geometry.x,top:geometry.y,width:geometry.width,height:geometry.height,background:'transparent',border:0,padding:0,touchAction:'none',userSelect:'none',cursor:'grab',outline:'none'}
  const popupPlacement=geometry.y>280?{bottom:floatingViewport().height-geometry.y+8}:{top:geometry.y+geometry.height+8}
- return jsxs('div',{ref:layerNode,'data-usage-corner':true,'data-usage-floating':true,'data-expanded':open,'data-session-remaining':left,'data-weekly-quota':weekly,'data-provider':data?.provider,'data-model':data?.model||liveModel,'data-token-total':source.usage?.total,role:'button',tabIndex:0,'aria-label':'استهلاك الموديل — اسحب للتحريك واسحب الزاوية لتغيير الحجم',style,
+ return jsxs('div',{ref:layerNode,'data-usage-corner':true,'data-usage-floating':true,'data-expanded':open,'data-session-remaining':left,'data-weekly-quota':weekly,'data-provider':data?.provider,'data-model':data?.model||liveModel,'data-token-total':source.usage?.total,role:'button',tabIndex:0,'aria-label':t.widgetAria,lang,style,
   onPointerDown:pointerDown,onPointerMove:pointerMove,onPointerUp:pointerUp,onPointerCancel:pointerUp,
   onMouseEnter:()=>setHover(true),onMouseLeave:()=>setHover(false),
   onDoubleClick:()=>setOpen(true),onContextMenu:event=>{event.preventDefault();setOpen(true)},
   onKeyDown:event=>{if(event.key==='Escape')setOpen(false);if(event.key==='Enter'){event.preventDefault();setOpen(true)}},children:[
    jsx('div',{style:{width:'100%',height:'100%',pointerEvents:'none'},children:jsx(FountainView,{provider,cycle,model:data?.model||liveModel||'',dock:true,artOnly:true})}),
-   jsx('div',{'data-usage-resize':true,role:'slider',tabIndex:0,'aria-label':'تغيير حجم الرسمة',onKeyDown:event=>{if(event.key==='ArrowRight'||event.key==='ArrowUp'){event.preventDefault();move({...geometryRef.current,width:geometryRef.current.width+8,height:geometryRef.current.height+8},true)}if(event.key==='ArrowLeft'||event.key==='ArrowDown'){event.preventDefault();move({...geometryRef.current,width:geometryRef.current.width-8,height:geometryRef.current.height-8},true)}},style:{position:'absolute',right:0,bottom:0,width:14,height:14,cursor:'nwse-resize',opacity:hover?1:0,transition:'opacity 150ms'},children:jsx('span',{style:{position:'absolute',right:2,bottom:2,width:7,height:7,borderRight:'1.5px solid var(--ui-text-secondary)',borderBottom:'1.5px solid var(--ui-text-secondary)',borderRadius:1,pointerEvents:'none'}})}),
-   open?jsx('div',{id:'usage-meter-details',role:'region','aria-label':'تفاصيل استهلاك الموديل والرصيد',onPointerDown:event=>event.stopPropagation(),onDoubleClick:event=>event.stopPropagation(),style:{position:'fixed',zIndex:10,left:Math.max(12,Math.min(geometry.x,floatingViewport().width-352)),...popupPlacement,width:'min(340px,calc(100vw - 24px))',maxHeight:Math.max(120,Math.min(640,geometry.y>280?geometry.y-20:floatingViewport().height-geometry.y-geometry.height-28)),overflow:'auto',cursor:'auto',border:'1px solid var(--ui-stroke-secondary)',borderRadius:14,background:'var(--ui-bg-elevated)'},children:jsxs('div',{children:[jsx('button',{'aria-label':'إغلاق التفاصيل',onClick:()=>setOpen(false),style:{position:'absolute',left:8,top:8,border:0,background:'transparent',color:'var(--ui-text-primary)',cursor:'pointer'},children:'×'}),jsx(UsagePane,{})]})}):null,
+   jsx('div',{'data-usage-resize':true,role:'slider',tabIndex:0,'aria-label':t.resizeAria,onKeyDown:event=>{if(event.key==='ArrowRight'||event.key==='ArrowUp'){event.preventDefault();move({...geometryRef.current,width:geometryRef.current.width+8,height:geometryRef.current.height+8},true)}if(event.key==='ArrowLeft'||event.key==='ArrowDown'){event.preventDefault();move({...geometryRef.current,width:geometryRef.current.width-8,height:geometryRef.current.height-8},true)}},style:{position:'absolute',right:0,bottom:0,width:14,height:14,cursor:'nwse-resize',opacity:hover?1:0,transition:'opacity 150ms'},children:jsx('span',{style:{position:'absolute',right:2,bottom:2,width:7,height:7,borderRight:'1.5px solid var(--ui-text-secondary)',borderBottom:'1.5px solid var(--ui-text-secondary)',borderRadius:1,pointerEvents:'none'}})}),
+   open?jsx('div',{id:'usage-meter-details',role:'region','aria-label':t.detailsAria,dir:t.dir,onPointerDown:event=>event.stopPropagation(),onDoubleClick:event=>event.stopPropagation(),style:{position:'fixed',zIndex:10,left:Math.max(12,Math.min(geometry.x,floatingViewport().width-352)),...popupPlacement,width:'min(340px,calc(100vw - 24px))',maxHeight:Math.max(120,Math.min(640,geometry.y>280?geometry.y-20:floatingViewport().height-geometry.y-geometry.height-28)),overflow:'auto',cursor:'auto',border:'1px solid var(--ui-stroke-secondary)',borderRadius:14,background:'var(--ui-bg-elevated)'},children:jsxs('div',{children:[jsx('button',{'aria-label':t.close,onClick:()=>setOpen(false),style:{position:'absolute',...(t.dir==='rtl'?{left:8}:{right:8}),top:8,border:0,background:'transparent',color:'var(--ui-text-primary)',cursor:'pointer'},children:'×'}),jsx(UsagePane,{})]})}):null,
    jsx('style',{children:'@keyframes usage-bamboo-flow{to{stroke-dashoffset:-28}}@keyframes usage-grass-sway{0%{transform:rotate(-3.5deg)}100%{transform:rotate(4deg)}}@keyframes usage-liquid-color{0%,100%{filter:brightness(.98) saturate(1.25)}50%{filter:brightness(1.04) saturate(1.3)}}@media(prefers-reduced-motion:reduce){[data-bamboo-scene] *{animation:none!important;transition:none!important}[data-usage-resize]{transition:none!important}}'})
   ]})
 }
 export default {
- id:'usage-meter',name:'استهلاك الموديل والرصيد',
+ id:'usage-meter',name:'Usage Meter · استهلاك الموديل',
  register(ctx) {
   widgetStorage=ctx.storage||null
-  console.info('[usage-meter] rock-garden-v13 loaded')
+  // Installs from before the language choice were Arabic-only: keep them Arabic.
+  try{let saved=widgetStorage?.get('language',null);if(saved==null&&widgetStorage?.get('floating-art-v1',null)!=null){saved='ar';widgetStorage.set('language','ar')}languageAtom.set(saved||'auto')}catch{}
+  console.info('[usage-meter] mountain-i18n-v14 loaded')
   ctx.register({id:'usage-corner-auto-v2',area:'statusBar.left',order:-10000,render:()=>jsx(UsageCorner,{})})
  }
 }

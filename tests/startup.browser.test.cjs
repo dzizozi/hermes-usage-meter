@@ -35,16 +35,18 @@ export const host={state:{focusedSessionId:atom(null),focusedSessionProfile:atom
  return {provider,model:host.state.model.get(),providers:[row]}
 }};
 export function useValue(a){return useSyncExternalStore(a.subscribe,a.get,a.get)}
+export const hermesLocale=atom('ar');
+export function useI18n(){return {locale:useValue(hermesLocale)}}
 `;
 const entry=`
 import React from 'react';import {createRoot} from 'react-dom/client';
 import {QueryClient,QueryClientProvider,focusManager,onlineManager} from '@tanstack/react-query';
-import {host,control} from '@hermes/plugin-sdk';import plugin from ${JSON.stringify(pluginPath)};
+import {host,control,hermesLocale} from '@hermes/plugin-sdk';import plugin from ${JSON.stringify(pluginPath)};
 const contributions=[];const storage={get:(k,f)=>{try{return JSON.parse(localStorage.getItem('test-usage-'+k))??f}catch{return f}},set:(k,v)=>localStorage.setItem('test-usage-'+k,JSON.stringify(v))};plugin.register({register:row=>contributions.push(row),storage});
 const client=new QueryClient();focusManager.setFocused(false);
 const tree=contributions.find(c=>c.area==='statusBar.left').render();
 createRoot(document.getElementById('root')).render(React.createElement(QueryClientProvider,{client},tree));
-window.testControl={host,control,focusManager,onlineManager,client,contributions};
+window.testControl={host,control,focusManager,onlineManager,client,contributions,hermesLocale};
 `;
 (async()=>{
  const result=await esbuild.build({stdin:{contents:entry,resolveDir:root,loader:'js'},bundle:true,nodePaths:[path.join(root,'node_modules')],write:false,platform:'browser',format:'iife',plugins:[{name:'test-sdk',setup(build){build.onResolve({filter:/^@hermes\/plugin-sdk$/},()=>({path:'test-sdk',namespace:'test-sdk'}));build.onLoad({filter:/.*/,namespace:'test-sdk'},()=>({contents:sdk,loader:'js',resolveDir:root}))}}]});
@@ -105,7 +107,7 @@ window.testControl={host,control,focusManager,onlineManager,client,contributions
   assert.equal(proportions.outletInsideW,true,JSON.stringify(proportions));assert.equal(proportions.entryInsideGlass,true);assert.equal(proportions.fallHitsRock,false);assert.equal(proportions.wCentreInRock,true);assert.ok(proportions.wBottom<112);
   pass('W watercourse is carved in the rock and its top-left lip falls clear of the stone into the bamboo');
   const sessionBox=await scene.locator('[data-bamboo-reservoir="S"]>path').first().evaluate(n=>{const b=n.getBBox();return {top:b.y,bottom:b.y+b.height,height:b.height,inlet:n.isPointInFill(new DOMPoint(158,151)),end:n.isPointInFill(new DOMPoint(120.5,242))}});
-  assert.equal(await scene.getAttribute('data-session-shape'),'s-watercourse');assert.ok(sessionBox.top<170&&sessionBox.bottom>245&&sessionBox.bottom<251&&sessionBox.height>80,JSON.stringify(sessionBox));assert.equal(sessionBox.inlet,true);assert.equal(sessionBox.end,true);
+  assert.equal(await scene.getAttribute('data-session-shape'),'s-watercourse');assert.ok(sessionBox.top<170&&sessionBox.bottom>245&&sessionBox.bottom<266&&sessionBox.height>80,JSON.stringify(sessionBox));assert.equal(sessionBox.inlet,true);assert.equal(sessionBox.end,true);
   const river=scene.locator('[data-session-channel]');const ends=await river.evaluate(n=>{const a=n.getPointAtLength(0),b=n.getPointAtLength(n.getTotalLength());return {a:[a.x,a.y],b:[b.x,b.y]}});assert.ok(ends.a[1]<175&&ends.b[1]>235);
   pass('S is one long watercourse from below the glass bamboo to its existing lower position');
   assert.equal(await scene.getAttribute('data-colour-style'),'apple-reference-v10');
@@ -132,6 +134,12 @@ window.testControl={host,control,focusManager,onlineManager,client,contributions
   assert.ok(garden.sway>=garden.grass&&garden.grass>=6&&garden.stones>=5,JSON.stringify(garden));assert.equal(garden.butterflies.length,2);
   for(const b of garden.butterflies)assert.ok(b.state==='away'?b.opacity===0:b.opacity>0&&/translate/.test(b.transform),JSON.stringify(b));
   pass('grass sways in the wind and butterflies are driven by the shared animation clock');
+  await page.waitForFunction(()=>[...document.querySelectorAll('[data-usage-floating] [data-binary-digit]')].some(n=>Number(n.style.opacity)>.2),{},{timeout:5000});
+  const digits=await scene.evaluate(svg=>[...svg.querySelectorAll('[data-binary-digit]')].filter(n=>Number(n.style.opacity)>0).map(n=>({c:n.textContent,x:+n.getAttribute('x'),y:+n.getAttribute('y')})));
+  assert.ok(digits.length>0&&digits.every(d=>/^[01]$/.test(d.c)&&d.x<60&&d.y>200),JSON.stringify(digits));
+  pass('S dissolves into small 0/1 digits where it leaves the picture');
+  const backdrop=await scene.evaluate(svg=>({mountain:svg.querySelector('[data-mountain-body]').isPointInFill(new DOMPoint(60,70)),outcrop:!!svg.querySelector('[data-spring-outcrop]'),frame:!!svg.querySelector('[data-scene-frame]')}));
+  assert.deepEqual(backdrop,{mountain:true,outcrop:true,frame:true});pass('a mountain fills the back and an outcrop hides the W spring');
   await widget.screenshot({path:path.join(scratch,'glass-tiny-retina.png')});
   pass('all three containers have live gravity-aligned waves and transparent nodal bamboo45deg');
   await page.mouse.move(box.x+10,box.y+10);await page.mouse.down();await page.mouse.move(box.x+130,box.y-120,{steps:8});await page.mouse.up();
@@ -214,6 +222,17 @@ window.testControl={host,control,focusManager,onlineManager,client,contributions
   await page.waitForFunction(()=>document.querySelector('[data-usage-floating]')?.getAttribute('data-session-remaining')===null);
   await page.locator('[aria-label="حساب مصدر بيانات الحصة"]').selectOption('');await waitS(85);await close();
   pass('Claude mixed-credential data resolves the reporting account and honors explicit source selection');
+  await details();assert.equal(await page.locator('[data-usage-meter]').getAttribute('dir'),'rtl');
+  await page.locator('[data-usage-language-select]').selectOption('fr');
+  await page.waitForFunction(()=>document.querySelector('[data-usage-meter]')?.getAttribute('data-usage-language')==='fr');
+  assert.equal(await page.locator('[data-usage-meter]').getAttribute('dir'),'ltr');assert.equal(await widget.getAttribute('aria-label'),'Consommation du modèle — glisser pour déplacer, tirer le coin pour redimensionner');
+  assert.ok(await page.locator('[aria-label="Fermer les détails"]').count());
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('test-usage-language'))),'fr');
+  for(const [code,label] of [['zh','关闭详情'],['es','Cerrar detalles'],['en','Close details']]){await page.locator('[data-usage-language-select]').selectOption(code);await page.locator(`[aria-label="${label}"]`).waitFor()}
+  await page.locator('[data-usage-language-select]').selectOption('auto');await page.evaluate(()=>window.testControl.hermesLocale.set('es'));
+  await page.waitForFunction(()=>document.querySelector('[data-usage-meter]')?.getAttribute('data-usage-language')==='es');
+  await page.evaluate(()=>window.testControl.hermesLocale.set('ar'));await page.locator('[aria-label="إغلاق التفاصيل"]').waitFor();await close();
+  pass('details follow the Hermes language, and a chosen language (ar, en, fr, es, zh) is saved and applied');
   for(const provider of ['gemini','nvidia','zai','nous']){
    await page.evaluate(p=>{window.testControl.host.state.model.set('test-'+p);window.testControl.host.state.focusedUsage.set({input:123,output:198,total:321})},provider);
    await page.waitForFunction(p=>document.querySelector('[data-usage-floating]')?.getAttribute('data-provider')===p,provider);

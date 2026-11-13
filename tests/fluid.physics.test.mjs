@@ -6,14 +6,18 @@ const src=readFileSync(process.env.USAGE_PLUGIN_PATH||new URL('../desktop/plugin
 function load(){const b={console,Date,Intl,Number,Math,atom:v=>({get:()=>v,set:n=>{v=n}}),jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})};vm.createContext(b);vm.runInContext(src,b);return b}
 const inside=(p,poly)=>{let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])c=!c}return c};
 const crosses=(p,q,r,s)=>{const o=(a,b,c)=>Math.sign((b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]));return o(p,q,r)*o(p,q,s)<0&&o(r,s,p)*o(r,s,q)<0};
-test('45-degree camera: W is a meandering W channel carved into the flat top of a grounded rock, pouring from its left end',()=>{
+test('45-degree camera: W is a meandering W channel carved into the sloping top of a grounded rock, pouring from its low left end',()=>{
  const b=load(),g=b.fluidGeometry(),w=g.weekly,k=Math.SQRT1_2,width=p=>Math.max(...p.map(q=>q[0]))-Math.min(...p.map(q=>q[0]));
  assert.ok(Math.abs(width(g.bamboo)-54*1.1)<1e-9,'approved bamboo size is unchanged');
  assert.equal(g.camera.elevation,45);
- for(let i=0;i<w.ground.length;i++)assert.ok(w.points[i][0]===w.ground[i][0]&&Math.abs(w.points[i][1]-w.ground[i][1]*k)<1e-9,'rock top is foreshortened by cos45');
+ for(let i=0;i<w.ground.length;i++)assert.ok(w.points[i][0]===w.ground[i][0]&&Math.abs(w.points[i][1]-(w.ground[i][1]*k+w.tilt.drop-w.tilt.slope*(w.ground[i][0]-174.5)))<1e-9,'rock top is foreshortened by cos45 and tilted');
+ assert.ok(w.tilt.slope>0&&w.tilt.drop>0);
+ assert.ok(w.spring[1]<w.lip[1]-20,'the spring end sits clearly higher than the outlet: water runs downhill');
+ // the whole tilted plane descends toward the outlet: every right-hand point is raised relative to a level surface
+ const level=w.ground.map(p=>p[1]*k);assert.ok(w.points.every((p,i)=>i===0||p[1]-level[i]<=w.points[0][1]-level[0]+1e-9));
  const P=w.points,inRange=(lo,hi)=>P.filter(p=>p[0]>=lo&&p[0]<=hi).map(p=>p[1]);
- assert.ok(Math.max(...inRange(198,222))>64&&Math.max(...inRange(244,268))>64,'two low valleys');assert.ok(Math.min(...inRange(225,240))<39,'raised middle');
- assert.ok(P[0][1]<36&&P.at(-1)[1]<36,'both W ends are high');for(let i=1;i<P.length;i++)assert.ok(P[i][0]>=P[i-1][0]-1e-9,'W reads left to right without loops');
+ const v1=Math.max(...inRange(198,222)),v2=Math.max(...inRange(244,268)),mid=Math.min(...inRange(225,240));
+ assert.ok(v1-mid>18&&v2-mid>12,'two valleys around a raised middle');assert.ok(P[0][1]<v1-15&&P.at(-1)[1]<v2-15,'both W ends rise above the valleys');for(let i=1;i<P.length;i++)assert.ok(P[i][0]>=P[i-1][0]-1e-9,'W reads left to right without loops');
  let turns=0,last=0;for(let i=1;i<P.length-1;i++){const c=Math.sign((P[i][0]-P[i-1][0])*(P[i+1][1]-P[i][1])-(P[i][1]-P[i-1][1])*(P[i+1][0]-P[i][0]));if(c&&last&&c!==last)turns++;if(c)last=c}
  assert.ok(turns>=8,'natural meanders, not a stiff letter: '+turns);
  for(let i=0;i<g.W.length;i++)for(let j=i+2;j<g.W.length;j++){if(i===0&&j===g.W.length-1)continue;assert.ok(!crosses(g.W[i],g.W[i+1],g.W[j],g.W[(j+1)%g.W.length]),'W bed must not self-intersect')}
@@ -22,7 +26,7 @@ test('45-degree camera: W is a meandering W channel carved into the flat top of 
  for(const p of g.rock.filter(p=>p[1]>100))assert.ok(inside(p,g.ground),'rock base rests on the ground '+p);
  const glass=[[113,158],[145,114],[258,114],[271,136],[258,158]].map(b.bambooPoint),restGlass=glass.map(p=>b.rotateFluidPoint(p,45));
  assert.ok(Math.max(...g.W.map(p=>p[1]))<Math.min(...restGlass.map(p=>p[1])),'W is higher than the bamboo');
- assert.ok(w.lip[0]<=Math.min(...P.map(p=>p[0]))&&w.lip[1]<36,'water leaves from the upper-left end');
+ assert.ok(w.lip[0]<=Math.min(...P.map(p=>p[0])),'water leaves from the left end');
  const mouth=b.bambooPoint([144.4,98]);assert.ok(w.lip[0]>mouth[0]&&w.lip[0]-mouth[0]<6,'jet leaves leftward and lands in the mouth');
  for(let s=.1;s<1;s+=.01){const x=w.lip[0]+(mouth[0]-w.lip[0])*s,y=w.lip[1]+(mouth[1]-w.lip[1])*s*s;assert.ok(!inside([x,y],g.rock),'falling water must stay outside the stone at y='+y)}
  for(let a=45;a>=-28;a-=.5){const p=glass.map(q=>b.rotateFluidPoint(q,a));for(let i=0;i<p.length;i++)for(let t=0;t<=1;t+=.05){const A=p[i],B=p[(i+1)%p.length];assert.ok(!inside([A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t],g.rock),'tipping bamboo hits the rock at '+a)}}
@@ -33,8 +37,8 @@ test('S lies flat on the ground under the same 45-degree camera, from beneath th
  const ch=g.channel;for(let i=0;i<ch.ground.length;i++)assert.ok(Math.abs(ch.points[i][1]-(151+ch.ground[i][1]*k))<1e-9&&ch.points[i][0]===ch.ground[i][0]);
  assert.ok(Math.abs(Math.abs(ch.left[0][1]-ch.right[0][1])-14*k)<.15,'width across the view is foreshortened');
  assert.ok(Math.abs(Math.abs(ch.left[28][0]-ch.right[28][0])-14)<.15&&Math.abs(ch.left[28][1]-ch.right[28][1])<.5,'width toward the camera is not');
- const c=g.channel;assert.ok(c.points[0][1]<175);assert.ok(c.points.at(-1)[1]>235&&c.points.at(-1)[1]<249);
- assert.ok(Math.min(...g.S.map(p=>p[1]))<170);assert.ok(Math.max(...g.S.map(p=>p[1]))<251);
+ const c=g.channel;assert.ok(c.points[0][1]<175);assert.ok(c.points.some(p=>Math.hypot(p[0]-118,p[1]-245)<1),'passes its former lower position');assert.ok(c.points.at(-1)[0]<3,'then runs off the left edge');
+ assert.ok(Math.min(...g.S.map(p=>p[1]))<170);assert.ok(Math.max(...g.S.map(p=>p[1]))<266);
  let sign=0,turns=0;for(let i=1;i<c.points.length;i++){assert.ok(c.points[i][1]>=c.points[i-1][1]-1e-8,'river cannot run uphill');const dx=c.points[i][0]-c.points[i-1][0];if(Math.abs(dx)>1e-8){const s=Math.sign(dx);if(sign&&sign!==s)turns++;sign=s}}
  assert.equal(turns,2,'long S needs two alternating bends');
  const f=b.fluidFrame(85,14,{progress:0,dumping:true,animationStart:0,refillFrom:0},400,0);
@@ -163,4 +167,35 @@ test('displayed quota glides toward new provider values without overshoot; unkno
  assert.ok(seen[0]<80&&seen[0]>60,'starts descending gradually');assert.equal(seen.at(-1),60,'settles exactly on the real value');
  for(let i=1;i<seen.length;i++)assert.ok(seen[i]<=seen[i-1]&&seen[i]>=60);
  assert.equal(b.easeShownQuota(80,null,100),null);assert.equal(b.easeShownQuota(undefined,42,100),42);assert.equal(b.easeShownQuota(80,60,100,true),60);
+});
+
+test('a large mountain fills the back, the spring hides in a crevice under an outcrop, and no W water is covered',()=>{
+ const b=load(),g=b.fluidGeometry(),m=g.mountain;
+ for(const x of [5,60,120,170])assert.ok(inside([x,60],m.near)||inside([x,60],m.far),'mountain behind x='+x);
+ assert.ok(Math.min(...m.near.map(p=>p[1]))<35,'a real mountain, not a low hill');assert.ok(m.shade.length>=3,'shaded facets');
+ for(const p of g.W)assert.ok(!inside(p,g.outcrop),'outcrop never hides quota-bearing water '+p);
+ assert.ok(g.outcrop.some(p=>Math.hypot(p[0]-g.weekly.spring[0],p[1]-g.weekly.spring[1])<3),'the channel runs into the outcrop');
+ const json=JSON.stringify(b.bambooScene(40,60,'mountain-test',true,{progress:.5,artOnly:true}));for(const s of ['data-mountain','data-spring-outcrop','data-scene-frame','data-binary-stream'])assert.ok(json.includes(s),s);
+});
+test('rocks always guard the S inlet and the stream runs off the left edge without hiding any water',()=>{
+ const b=load(),g=b.fluidGeometry(),[ix,iy]=g.channel.inlet;
+ assert.ok(g.stones.filter(s=>s.source&&Math.hypot(s.x-ix,s.y-iy)<20).length>=3,'source stones near the inlet');
+ assert.ok(g.channel.exitsView&&g.channel.end[0]<3,'S leaves the picture');assert.ok(Math.min(...g.S.map(p=>p[0]))>=0,'all quota-bearing S water stays inside the picture');
+ assert.ok(Math.max(...g.S.map(p=>p[1]))<266);
+});
+test('S dissolves into small 0/1 digits at its exit only while it holds water',()=>{
+ const b=load();let seen=0;
+ for(let t=0;t<12000;t+=137)for(let i=0;i<16;i++){const d=b.binaryDigit(t,i,.4);if(!d)continue;seen++;
+  assert.ok(d.char==='0'||d.char==='1');assert.ok(d.opacity>=0&&d.opacity<=1);assert.ok(d.size>3&&d.size<8);assert.ok(d.x<60&&d.y>200,'digits rise from the stream exit '+d.x+','+d.y)}
+ assert.ok(seen>200);for(const v of [0,null,undefined,Number.NaN])assert.equal(b.binaryDigit(1000,0,v),null);
+});
+test('five interface languages share every key; the widget follows Hermes unless the user picks one',()=>{
+ const b=load(),keys=Object.keys(b.usageText('en')).sort();
+ for(const lang of ['ar','en','fr','es','zh']){const t=b.usageText(lang);assert.deepEqual(Object.keys(t).sort(),keys,lang);
+  for(const [k,v] of Object.entries(t))if(typeof v==='function')assert.equal(typeof v(1,2,3),'string',lang+'.'+k);
+  assert.equal(t.dir,lang==='ar'?'rtl':'ltr')}
+ assert.equal(b.resolveUsageLanguage('auto','fr-FR'),'fr');assert.equal(b.resolveUsageLanguage(null,'zh-hant'),'zh');assert.equal(b.resolveUsageLanguage(null,'de'),'en');
+ assert.equal(b.resolveUsageLanguage('es','ar'),'es');assert.equal(b.resolveUsageLanguage(null,undefined),'en');
+ assert.equal(b.countdown('2026-10-19T15:00:00Z',Date.parse('2026-10-20T10:00:00Z'),'fr'),b.usageText('fr').due);
+ assert.match(b.countdown('2026-10-20T15:00:00Z',Date.parse('2026-10-20T10:00:00Z'),'zh'),/5 小时 0 分/);
 });

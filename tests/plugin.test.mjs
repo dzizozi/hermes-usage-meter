@@ -84,11 +84,13 @@ test('Gemini quota absence is explained rather than fabricated', ()=> {
  const b=load({host,useQuery:()=>({data:{provider:'gemini',model:'gemini-pro',providers:[{slug:'gemini'}]}})});
  assert.equal(b.gaugeRemaining({slug:'gemini'}),null);
  const text=JSON.stringify(paneFrom(b));
- assert.match(text,/120/); assert.match(text,/تكامل Gemini/);
+ assert.match(text,/120/); assert.match(text,/Gemini integration does not report/);
+ b.languageAtom.set('ar');const arabic=JSON.stringify(paneFrom(b));assert.match(arabic,/تكامل Gemini/);assert.match(arabic,/"dir":"rtl"/);
+ b.languageAtom.set('fr');assert.match(JSON.stringify(paneFrom(b)),/L’intégration Gemini/);
 });
 test('art-only mode hides percentage and explanatory captions without changing reservoir values',()=>{
  const b=load(); const scene=b.bambooScene(50,37,'art-only',true,{progress:.5,phase:'filling',artOnly:true});
- const json=JSON.stringify(scene);assert.ok(!json.includes('37%'));assert.ok(!json.includes('متبقٍ أسبوعيًا'));
+ const json=JSON.stringify(scene);assert.ok(!json.includes('37%'));assert.ok(!json.includes(b.usageText().weeklyLeft));
  assert.ok(json.includes('usage-aurora-reservoir'));assert.ok(json.includes('data-reservoir-remaining'));
 });
 test('buffer bamboo tracks time independently from W and S and only tips on confirmed renewal', ()=> {
@@ -187,8 +189,8 @@ test('startup profile resolution falls back to gateway profile until focus is re
 test('countdown handles exact reset, expired reset and missing time', ()=> {
  const b=load(); const now=Date.parse('2026-10-20T10:00:00Z');
  assert.match(b.countdown('2026-10-20T15:00:00Z',now), /5.*0/);
- assert.match(b.countdown('2026-10-19T15:00:00Z',now), /تحديث/);
- assert.equal(b.countdown(null,now), 'موعد غير متاح');
+ assert.match(b.countdown('2026-10-19T15:00:00Z',now,'ar'), /تحديث/);
+ assert.equal(b.countdown(null,now,'ar'), 'موعد غير متاح');assert.equal(b.countdown(null,now,'en'),'Time unavailable');
 });
 test('pane follows session and renders both tokens and provider quota', ()=> {
  const calls=[];
@@ -197,4 +199,11 @@ test('pane follows session and renders both tokens and provider quota', ()=> {
  const tree=paneFrom(b); const text=JSON.stringify(tree);
  assert.match(text,/150/); assert.match(text,/77/); assert.match(text,/my-model/);
  assert.ok(calls[0].queryKey.includes('s1'));
+});
+
+test('earlier Arabic-only installs stay Arabic; fresh installs follow the Hermes language',()=>{
+ for(const [saved,expected] of [[{'floating-art-v1':{x:1}},'ar'],[{},'auto'],[{'floating-art-v1':{x:1},language:'es'},'es']]){
+  const store={...saved},b=load();b.plugin.register({register:()=>{},storage:{get:(k,f)=>k in store?store[k]:f,set:(k,v)=>{store[k]=v}}});
+  assert.equal(b.languageAtom.get(),expected);
+ }
 });

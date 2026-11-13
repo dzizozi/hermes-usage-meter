@@ -10,9 +10,9 @@ Japanese rock garden fountain (*shishi-odoshi*), seen from a 45° camera.
 
 | Part | Meaning |
 |---|---|
-| **W** channel, carved into the top of a boulder | Remaining **weekly** quota. Water rises at the right-hand spring and leaves from the left end into the bamboo. As the week is used, the channel dries from the spring while the outlet end stays wet |
+| **W** channel, carved into the sloping top of a boulder at the foot of a mountain | Remaining **weekly** quota. Water rises from a spring hidden under a rock outcrop and runs downhill to the left end, where it falls into the bamboo. As the week is used, the channel dries from the spring while the outlet end stays wet |
 | Glass bamboo | Time until the 5-hour session window resets, from the provider's real `resets_at` |
-| **S** stream, lying flat in the ground | Remaining **session / 5-hour** quota. Water pools at the downstream end; with use it recedes gradually from the inlet |
+| **S** stream, lying flat in the ground | Remaining **session / 5-hour** quota. It starts among rocks under the bamboo and runs off the edge of the picture, where its water dissolves into tiny 0/1 digits. With use it recedes gradually from the inlet |
 
 When the provider confirms a renewal, the bamboo tips and pours once into S, which fills up
 to the new real balance.
@@ -73,7 +73,7 @@ To uninstall, delete that folder (or disable the plugin on the Plugins page).
   stays out of the way of their clicks.
 - `prefers-reduced-motion` freezes all waves, grass and butterflies.
 
-The interface text is currently in Arabic.
+The details panel speaks **English, Français, Español, 中文 and العربية**. By default it follows Hermes' own interface language; pick another one in the panel's *Language* menu (the choice is remembered). Earlier Arabic-only installs keep Arabic.
 
 ## Development
 
@@ -81,8 +81,8 @@ The tests reuse the dev dependencies already present in a Hermes Agent checkout
 (esbuild, React, React Query, Playwright). Nothing is installed.
 
 ```sh
-npm test               # 39 unit and fluid-physics tests (Node 20+)
-npm run test:browser   # 34 real-browser scenarios with React + React Query
+npm test               # 44 unit and fluid-physics tests (Node 20+)
+npm run test:browser   # 37 real-browser scenarios with React + React Query
 ```
 
 `HERMES_AGENT_DIR` points the browser test at a specific checkout. It tries Playwright's
@@ -95,9 +95,10 @@ Chromium, then Edge, then Chrome. All network data in the browser test is synthe
 ويدجيت صغيرة عائمة لتطبيق **Hermes Agent Desktop** على ويندوز وماك ولينكس. تعرض حصة
 الاشتراك الحقيقية على شكل حديقة صخرية يابانية بنافورة خيزران، مرسومة من زاوية كاميرا 45°:
 
-- **W:** مجرى متعرّج محفور في سطح صخرة موضوعة على الأرض، يمثل الحصة الأسبوعية. ينبع الماء من طرفه الأيمن ويصب من طرفه الأيسر في القصبة، ومع الاستهلاك يجف من جهة المنبع ويبقى ممتلئًا عند المصب.
+- **W:** مجرى متعرّج محفور في السطح المائل لصخرة عند سفح جبل، يمثل الحصة الأسبوعية. ينبع الماء من شق مخفي تحت صخرة، وينحدر حتى طرفه الأيسر فيصب في القصبة. مع الاستهلاك يجف من جهة المنبع ويبقى ممتلئًا عند المصب.
 - **القصبة الزجاجية:** الوقت المتبقي حتى تجدد نافذة الخمس ساعات، حسب موعد المزوّد الفعلي.
-- **مجرى S:** مجرى مستوٍ في الأرض يمثل حصة الجلسة (5 ساعات). يتجمع الماء في آخره، ومع الاستخدام ينحسر تدريجيًا من جهة القصبة. حوله أحجار وحشائش تتمايل، وتزوره فراشة أو اثنتان كل 30 ثانية.
+- **مجرى S:** مجرى مستوٍ في الأرض يمثل حصة الجلسة (5 ساعات). يبدأ بين صخور تحت القصبة ويخرج من حافة الرسمة، حيث يتحول ماؤه إلى أرقام 0 و1 صغيرة تتطاير وتختفي. مع الاستخدام ينحسر تدريجيًا من جهة القصبة. حوله أحجار وحشائش تتمايل، وتزوره فراشة أو اثنتان كل 30 ثانية.
+- **اللغات:** تفاصيل الاستهلاك متاحة بالعربية والإنجليزية والفرنسية والإسبانية والصينية. تتبع لغة Hermes تلقائيًا، ويمكن اختيار لغة أخرى من قائمة *اللغة* في نافذة التفاصيل.
 
 عند تأكيد المزوّد للتجدد، تنقلب القصبة وتسكب مرة واحدة في S.
 
