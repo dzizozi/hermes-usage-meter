@@ -160,60 +160,86 @@ function liquidLevel(p,fraction,capacity=polygonArea(p)) {
  const target=Math.min(polygonArea(p),Math.max(0,fraction)*capacity);
  for(let i=0;i<28;i++){const mid=(low+high)/2;if(polygonArea(polygonBelow(p,mid))>target)low=mid;else high=mid}return(low+high)/2
 }
+// 45-degree oblique camera: every horizontal surface (the ground and the top of
+// the rock) is foreshortened by cos45, so the channels lie flat on what carved them.
+const CAMERA_K=Math.SQRT1_2;
+function catmullRom(knots,steps=6,closed=false) {
+ const n=knots.length,out=closed?[]:[knots[0]],count=closed?n:n-1,at=i=>closed?knots[(i+n)%n]:knots[Math.max(0,Math.min(n-1,i))];
+ for(let i=0;i<count;i++){const p0=at(i-1),p1=at(i),p2=at(i+1),p3=at(i+2);
+  for(let s=closed?0:1;s<=(closed?steps-1:steps);s++){const t=s/steps,t2=t*t,t3=t2*t;out.push([0,1].map(k=>.5*(2*p1[k]+(-p0[k]+p2[k])*t+(2*p0[k]-5*p1[k]+4*p2[k]-p3[k])*t2+(-p0[k]+3*p1[k]-3*p2[k]+p3[k])*t3)))}}
+ return out
+}
+// Built in ground coordinates, then projected: the width is foreshortened exactly
+// like the surface the water carved it into.
+function carvedChannel(ground,half,project) {
+ const left=[],right=[];
+ for(let i=0;i<ground.length;i++){const a=ground[Math.max(0,i-1)],b=ground[Math.min(ground.length-1,i+1)],dx=b[0]-a[0],dz=b[1]-a[1],l=Math.hypot(dx,dz)||1,nx=-dz/l*half,nz=dx/l*half;
+  left.push(project([ground[i][0]+nx,ground[i][1]+nz]));right.push(project([ground[i][0]-nx,ground[i][1]-nz]))}
+ // Tight meanders can fold the inner bank onto itself; collapse each fold to its
+ // crossing point (keeping indices aligned) so the bank stays a simple outline.
+ const meet=(a,b,c,d)=>{const r=[b[0]-a[0],b[1]-a[1]],s=[d[0]-c[0],d[1]-c[1]],den=r[0]*s[1]-r[1]*s[0];if(Math.abs(den)<1e-12)return null;const t=((c[0]-a[0])*s[1]-(c[1]-a[1])*s[0])/den,u=((c[0]-a[0])*r[1]-(c[1]-a[1])*r[0])/den;return t>0&&t<1&&u>0&&u<1?[a[0]+t*r[0],a[1]+t*r[1]]:null};
+ for(const line of [left,right])for(let i=0;i<line.length-3;i++)for(let j=Math.min(line.length-2,i+16);j>i+1;j--){const p=meet(line[i],line[i+1],line[j],line[j+1]);if(p){for(let q=i+1;q<=j;q++)line[q]=p;i=j;break}}
+ const points=ground.map(project);let length=0;for(let i=1;i<points.length;i++)length+=Math.hypot(points[i][0]-points[i-1][0],points[i][1]-points[i-1][1]);
+ return {ground,points,left,right,polygon:[...left,...[...right].reverse()],half,length,d:'M'+points.map(p=>p.map(n=>Number(n.toFixed(3))).join(' ')).join('L')}
+}
 function makeSessionChannel() {
- const points=[[169,151]];let previous=points[0];
- const cubic=(a,b,c)=>{const start=previous;for(let i=1;i<=28;i++){const t=i/28,u=1-t;points.push([u*u*u*start[0]+3*u*u*t*a[0]+3*u*t*t*b[0]+t*t*t*c[0],u*u*u*start[1]+3*u*u*t*a[1]+3*u*t*t*b[1]+t*t*t*c[1]])}previous=c};
- cubic([145,151],[117,160],[117,184]);cubic([117,201],[158,198],[158,215]);cubic([158,233],[139,242],[120,242]);
- const left=[],right=[],half=6;
- for(let i=0;i<points.length;i++){const a=points[Math.max(0,i-1)],b=points[Math.min(points.length-1,i+1)],dx=b[0]-a[0],dy=b[1]-a[1],length=Math.hypot(dx,dy)||1,nx=-dy/length*half,ny=dx/length*half;left.push([points[i][0]+nx,points[i][1]+ny]);right.push([points[i][0]-nx,points[i][1]-ny])}
- return {points,polygon:[...left,...right.reverse()],inlet:[158,151],end:[120,242],width:12,d:'M169 151C145 151 117 160 117 184C117 201 158 198 158 215C158 233 139 242 120 242'};
+ const project=p=>[p[0],151+p[1]*CAMERA_K],start=[160,0],ground=[start];let previous=start;
+ const curves=[[[125,0],[90,10],[90,36]],[[90,56],[162,60],[168,84]],[[174,106],[156,133],[118,133]]];
+ for(const [a,b,c] of curves){const s=previous;for(let i=1;i<=28;i++){const t=i/28,u=1-t;ground.push([0,1].map(k=>u*u*u*s[k]+3*u*u*t*a[k]+3*u*t*t*b[k]+t*t*t*c[k]))}previous=c}
+ const channel=carvedChannel(ground,7,project),pr=p=>project(p).map(n=>Number(n.toFixed(3))).join(' ');
+ // The stream runs downhill from the bamboo; water pools at its far end first.
+ return {...channel,inlet:[158,151],end:project([118,133]),width:14,surface:'ground',drainsFrom:'upstream',d:'M'+pr(start)+curves.map(c=>'C'+c.map(pr).join(' ')).join('')}
 }
-// Closed outline of a thick polyline: miter on the inner side of every bend,
-// bevel on the outer side, so the channel never self-intersects.
-function strokeOutline(points,half) {
- const dir=i=>{const a=points[i],b=points[i+1],dx=b[0]-a[0],dy=b[1]-a[1],l=Math.hypot(dx,dy);return[dx/l,dy/l]},normal=d=>[-d[1],d[0]];
- const left=[],right=[],last=points.length-1;
- for(let i=0;i<=last;i++){
-  const p=points[i];
-  if(i===0||i===last){const n=normal(dir(i===0?0:last-1));left.push([p[0]+n[0]*half,p[1]+n[1]*half]);right.push([p[0]-n[0]*half,p[1]-n[1]*half]);continue}
-  const d0=dir(i-1),d1=dir(i),n0=normal(d0),n1=normal(d1),side=Math.sign(d1[0]*n0[0]+d1[1]*n0[1])||1;
-  const mx=n0[0]+n1[0],my=n0[1]+n1[1],ml=Math.hypot(mx,my),cos=(mx*n0[0]+my*n0[1])/ml,miter=[mx/ml*half/cos,my/ml*half/cos];
-  const inner=[p[0]+side*miter[0],p[1]+side*miter[1]],outer=[[p[0]-side*n0[0]*half,p[1]-side*n0[1]*half],[p[0]-side*n1[0]*half,p[1]-side*n1[1]*half]];
-  if(side>0){left.push(inner);right.push(...outer)}else{right.push(inner);left.push(...outer)}
- }
- return [...left,...right.reverse()]
-}
-// W is a watercourse carved into a rock that stands above the bamboo. Its
-// top-left end is the lip the water leaves from, straight above the bamboo mouth.
+// W is carved into the flat top of a boulder that sits on the ground behind the
+// bamboo. Water rises at the right-hand spring and leaves from the left end.
 function makeWeeklyChannel() {
- const points=[[175,40],[201,94],[226,62],[251,94],[277,40]],half=5.5,polygon=strokeOutline(points,half);
- const a=points[0],b=points[1],l=Math.hypot(b[0]-a[0],b[1]-a[1]),n=[-(b[1]-a[1])/l,(b[0]-a[0])/l];
- const lip=[a[0]+n[0]*half,a[1]+n[1]*half],spring=[a[0]+(b[0]-a[0])/l*2,a[1]+(b[1]-a[1])/l*2];
- // The rock's lower-left face hugs the W's outer wall, so the falling water stays outside the stone.
- const face=[0,1].map(i=>{const q=i?polygon[1]:lip;return[q[0]+n[0]*.8,q[1]+n[1]*.8]});
- const rock=[face[0],[170.5,36.5],[178,30],[190,22],[212,13],[238,9],[264,13],[285,24],[294,40],[297,66],[293,96],[296,132],[292,172],[297,214],[294,251],[268,254],[241,252],[236,222],[241,190],[234,156],[240,128],[236,110],[222,104],[206.5,101],[198,100.4],face[1]];
- return {points,polygon,lip,spring,rock,half}
+ const k=CAMERA_K,knots=[[174.5,32],[181,31],[187,33],[192,38],[195,44],[196,50],[200,57],[203,62],[207,66],[212,66.5],[216,62.5],[218,56],[221,50],[223,44],[226,40],[230,37.5],[234,37.5],[238,40],[240,44],[241,49],[246,55],[249,61],[253,65.5],[258,66.5],[262,63],[265,57],[268,51],[272,43],[276,35],[281,28],[288,23]];
+ const channel=carvedChannel(catmullRom(knots.map(p=>[p[0],p[1]/k]),5),5,p=>[p[0],p[1]*k]);
+ // Irregular boulder: a weathered flat top (where W is carved) and faceted sides.
+ const plateau=catmullRom([[176.5,27],[181,20],[189,15],[200,12.5],[213,11],[226,9],[241,10],[254,8.5],[267,11],[279,13],[288,18],[294.5,27],[295.5,40],[293,54],[290,66],[283,76],[270,81],[255,83.5],[240,82],[226,83],[212,80],[200,75.5],[193,67],[188.5,56],[184.5,45],[179.5,37.5]],4,true);
+ const rock=catmullRom([[175,27],[178,19],[186,13],[197,10],[211,8.5],[224,6],[240,7],[252,5.5],[266,8],[279,10],[289,15],[296,24],[298.5,36],[297,50],[299,66],[297,84],[298,100],[294,112],[284,119],[272,123],[258,121.5],[246,118],[236,113],[224,110],[212,108.5],[200,106],[193,101],[190.5,90],[188,76],[185,62],[181,48],[177.5,37]],4,true);
+ const facets=[
+  {shade:'lit',points:[[179.5,37.5],[184.5,45],[188.5,56],[193,67],[200,75.5],[204,92],[200,106],[193,101],[190.5,90],[188,76],[185,62],[181,48],[177.5,37]]},
+  {shade:'mid',points:[[200,75.5],[212,80],[226,83],[240,82],[244,98],[236,113],[224,110],[212,108.5],[200,106],[204,92]]},
+  {shade:'shade',points:[[240,82],[255,83.5],[270,81],[283,76],[290,66],[293,54],[295.5,40],[297,50],[299,66],[297,84],[298,100],[294,112],[284,119],[272,123],[258,121.5],[246,118],[236,113],[244,98]]}];
+ return {...channel,lip:channel.points[0],spring:channel.points.at(-1),plateau,rock,facets,surface:'rock',drainsFrom:'source'}
 }
-const SCENE_GRASS=[[104,193,1.3],[152,189,1.15],[128,233,1.1],[172,239,1.2],[103,251,1.1],[206,167,1],[230,251,1.35],[252,252,1],[214,14,.7],[87,214,1]];
-const SCENE_STONES=[[95,201,6,4.2],[178,229,4.6,3.2],[107,256,5.2,3],[147,254,4.2,2.6],[186,166.5,5,2.4],[199,166.5,4.6,2.2],[221,256,6,3.4],[163,250,3.4,2.2]];
-const BUTTERFLY_PERIOD=30000,BUTTERFLY_VISIT=11000;
+function pointInPolygon(p,poly) {let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])c=!c}return c}
+function distanceToPolygon(p,poly) {let d=Infinity;for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy||1,t=Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/l));d=Math.min(d,Math.hypot(p[0]-a[0]-t*dx,p[1]-a[1]-t*dy))}return d}
 function sceneHash(n) {const x=Math.sin(n*127.1+17.3)*43758.5453;return x-Math.floor(x)}
-// Every 30 s one or two butterflies arrive, rest on a grass tuft and leave.
+// Grass, stones and pebbles grow on the banks and the ground, never in the water.
+function makeGarden(S,W,rock,ground) {
+ const k=CAMERA_K,blocked=(p,gap)=>pointInPolygon(p,S.polygon)||pointInPolygon(p,W.polygon)||pointInPolygon(p,rock)||distanceToPolygon(p,S.polygon)<gap||!pointInPolygon(p,ground);
+ const bank=(frac,dist,far)=>{const n=S.ground.length-1,i=Math.round(frac*n),a=S.ground[Math.max(0,i-1)],b=S.ground[Math.min(n,i+1)],dx=b[0]-a[0],dz=b[1]-a[1],l=Math.hypot(dx,dz)||1;let nx=-dz/l,nz=dx/l;if((nz<0)!==far){nx=-nx;nz=-nz}return[S.ground[i][0]+nx*dist,151+(S.ground[i][1]+nz*dist)*k]};
+ const grass=[],tryGrass=(p,s)=>{for(let up=0;up<=4;up++)if(blocked([p[0],p[1]-up],1.2))return;if(grass.some(q=>Math.hypot(q[0]-p[0],q[1]-p[1])<8))return;grass.push([Number(p[0].toFixed(2)),Number(p[1].toFixed(2)),s])};
+ [.02,.1,.19,.27,.36,.45,.53,.62,.71,.8,.88,.97].forEach((f,i)=>tryGrass(bank(f,9.5+sceneHash(i)*3,i%3!==2),Number((1+sceneHash(i+9)*.45).toFixed(2))));
+ [[34,176,1.1],[56,232,1.2],[250,168,1.15],[284,196,1.25],[236,238,1.35],[272,248,1.05],[150,120,.95],[286,132,1],[214,128,.85]].forEach(([x,y,s])=>tryGrass([x,y],s));
+ const stones=[];
+ [[.06,1],[.24,0],[.33,1],[.5,0],[.66,1],[.83,0],[.93,1]].forEach(([f,far],i)=>{const r=3.6+sceneHash(i*7.7)*2.6,c=bank(f,7+r*1.15+1.8,!!far),cz=(c[1]-151)/k,footprint=[],outline=[];
+  for(let j=0;j<11;j++){const a=j/11*Math.PI*2,rr=r*(.8+.32*sceneHash(i*31+j)),p=[c[0]+Math.cos(a)*rr*1.15,151+(cz+Math.sin(a)*rr)*k];footprint.push(p);outline.push([p[0],p[1]-Math.max(0,-Math.sin(a))*r*.95*k])}
+  if(footprint.some(p=>pointInPolygon(p,S.polygon)||distanceToPolygon(p,S.polygon)<.8||pointInPolygon(p,W.polygon)||!pointInPolygon(p,ground)))return;
+  stones.push({x:c[0],y:c[1],r,footprint,outline})});
+ const pebbles=[];for(let i=0;pebbles.length<34&&i<500;i++){const p=[20+sceneHash(i*3.1)*276,100+sceneHash(i*5.7)*160];if(blocked(p,1.5)||stones.some(s=>Math.hypot(s.x-p[0],s.y-p[1])<s.r*1.6))continue;pebbles.push([Number(p[0].toFixed(2)),Number(p[1].toFixed(2)),Number((.6+sceneHash(i*9.3)*1.1).toFixed(2))])}
+ return {grass,stones,pebbles}
+}
+const BUTTERFLY_PERIOD=30000,BUTTERFLY_VISIT=11000;
+// Every 30 s one or two butterflies arrive with an erratic, bobbing flight, rest
+// on a grass tip (slowly opening and closing their wings) and fly away.
 function butterflyFlight(time,index) {
  if(!Number.isFinite(time)||time<0)return null;
- const cycle=Math.floor(time/BUTTERFLY_PERIOD),count=sceneHash(cycle*3.7)>.5?2:1;if(index>=count)return null;
+ const grass=FLUID_GEOMETRY.grass,cycle=Math.floor(time/BUTTERFLY_PERIOD),count=sceneHash(cycle*3.7)>.5?2:1;if(index>=count||!grass.length)return null;
  const local=time-cycle*BUTTERFLY_PERIOD-index*1900;if(local<0||local>BUTTERFLY_VISIT)return null;
- const h=k=>sceneHash(cycle*13.1+index*5.3+k),u=local/BUTTERFLY_VISIT,ease=n=>n*n*(3-2*n),lerp=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
- const tuft=SCENE_GRASS[Math.floor(h(1)*SCENE_GRASS.length)],rest=[tuft[0]+(h(2)-.5)*6,tuft[1]-13*tuft[2]-2];
- const fromLeft=h(3)<.5,entry=[fromLeft?-14:314,120+h(4)*90],exit=[fromLeft?314:-14,30+h(5)*70];
- const hover=[rest[0]+3.5*Math.sin(local*.0021),rest[1]+1.6*Math.sin(local*.0034)];
- const at=u<.33?lerp(entry,rest,ease(u/.33)):u<.68?hover:lerp(hover,exit,ease((u-.68)/.32));
- const perched=u>=.4&&u<.62,flapRate=perched?.008:.03,y=at[1]+(perched?0:2.2*Math.sin(local*.009));
- const prev=u<.33?lerp(entry,rest,ease(Math.max(0,u-.01)/.33)):u<.68?rest:lerp(hover,exit,ease(Math.max(0,u-.69)/.32));
- const facing=Math.abs(at[0]-prev[0])>.01?Math.sign(at[0]-prev[0]):fromLeft?1:-1;
- return {x:at[0],y,flap:.22+.78*Math.abs(Math.sin(local*flapRate)),facing,opacity:Math.min(1,u/.05,(1-u)/.05),perched,hue:Math.floor(h(6)*2)}
+ const h=k=>sceneHash(cycle*13.1+index*5.3+k),ease=n=>n*n*(3-2*n),lerp=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
+ const tuft=grass[Math.floor(h(1)*grass.length)],rest=[tuft[0]+(h(2)-.5)*4,tuft[1]-13*tuft[2]-2];
+ const fromLeft=h(3)<.5,entry=[fromLeft?-16:316,120+h(4)*90],exit=[fromLeft?316:-16,30+h(5)*70];
+ const place=t=>{const u=t/BUTTERFLY_VISIT,base=u<.33?lerp(entry,rest,ease(u/.33)):u<.68?rest:lerp(rest,exit,ease((u-.68)/.32));
+  const perched=u>=.4&&u<.62,jitter=perched?0:u<.33||u>=.68?1:Math.min(1,Math.max(0,(Math.abs(u-.51)-.11)/.07));
+  return {p:[base[0]+jitter*(2.6*Math.sin(t*.0047+h(7)*6)+1.1*Math.sin(t*.013)),base[1]+jitter*3.2*Math.sin(t*.014+h(8)*6)],perched,u}};
+ const now=place(local),before=place(Math.max(0,local-24)),dx=now.p[0]-before.p[0],dy=now.p[1]-before.p[1];
+ const heading=now.perched||Math.hypot(dx,dy)<.02?Math.atan2(rest[1]-entry[1],rest[0]-entry[0]):Math.atan2(dy,dx);
+ const flap=now.perched?.1+.9*Math.pow(.5+.5*Math.sin(local*.0017+1),4):.14+.86*Math.abs(Math.sin(local*.032));
+ return {x:now.p[0],y:now.p[1],angle:heading*180/Math.PI+90,flap,opacity:Math.min(1,now.u/.05,(1-now.u)/.05),perched:now.perched,variant:index}
 }
-// Displayed quota glides toward each new provider value instead of jumping.
 function easeShownQuota(shown,target,dt,reduced=false) {
  if(reduced||typeof target!=='number'||!Number.isFinite(target)||typeof shown!=='number'||!Number.isFinite(shown))return target;
  const next=shown+(target-shown)*(1-Math.exp(-Math.max(0,dt)/1100));return Math.abs(target-next)<.02?target:next
@@ -230,8 +256,10 @@ function fluidGeometry() {return FLUID_GEOMETRY}
 const FLUID_GEOMETRY=(()=>{
  const weekly=makeWeeklyChannel(),W=weekly.polygon;
  const channel=makeSessionChannel(),S=channel.polygon;
+ const ground=catmullRom([[10,206],[16,168],[38,138],[78,118],[124,104],[160,96],[200,94],[240,90],[280,92],[299,104],[299,226],[284,256],[230,265],[150,265],[70,262],[24,246]],6,true);
+ const garden=makeGarden(channel,weekly,weekly.rock,ground);
  const bamboo=[[148,120],[254,120],[254,152],[119,152]].map(bambooPoint),rest=bamboo.map(p=>rotateFluidPoint(p,45));
- return {W,S,channel,weekly,rock:weekly.rock,grass:SCENE_GRASS,stones:SCENE_STONES,bamboo,capacity:polygonArea(polygonBelow(rest,rotateFluidPoint(bambooPoint([113,158]),45)[1]))}
+ return {W,S,channel,weekly,rock:weekly.rock,plateau:weekly.plateau,ground,...garden,camera:{elevation:45,k:CAMERA_K},bamboo,capacity:polygonArea(polygonBelow(rest,rotateFluidPoint(bambooPoint([113,158]),45)[1]))}
 })();
 function fluidPath(p) {return p.length?'M'+p.map(a=>a.map(n=>Number(n.toFixed(3))).join(' ')).join('L')+'Z':''}
 function dumpFluidState(u) {
@@ -254,11 +282,28 @@ function fluidFrame(sessionLeft,weeklyLeft,cycle={},nowDoc=0,nowWall=Date.now(),
  if(dumping&&session!==null&&known(cycle.refillFrom)){const from=Math.min(session,fraction(cycle.refillFrom));session=from+(session-from)*(1-buffer)}
  const liquid=(polygon,value,capacity=polygonArea(polygon))=>({polygon,fraction:value,capacity,volume:value===null?null:value*capacity,level:liquidLevel(polygon,value,capacity)});
  const flux=dumping&&u>0?Math.max(0,dumpFluidState(Math.max(0,u-.008)).fraction-state.fraction)/.008:0;
- return {angle:state.angle,W:liquid(FLUID_GEOMETRY.W,fraction(weeklyLeft)),S:liquid(FLUID_GEOMETRY.S,session),
+ return {angle:state.angle,W:channelLiquid(FLUID_GEOMETRY.weekly,fraction(weeklyLeft)),S:channelLiquid(FLUID_GEOMETRY.channel,session),
   bamboo:liquid(state.polygon,buffer,FLUID_GEOMETRY.capacity),
   jet:{source:state.lip,target:FLUID_GEOMETRY.channel.inlet,opacity:Math.min(1,flux*.45),width:Math.min(5,1.4+Math.sqrt(flux)*1.3)},
   flowing:known(weeklyLeft)&&weeklyLeft>0&&progress!==null&&progress<1&&!dumping,
   motion:reduced?0:1,time:nowDoc}
+}
+// Water in a flat channel has no tilted level: it fills from the end it drains
+// toward. W keeps water at its outlet and dries from the spring; S pools at its
+// downstream end and dries from the inlet. Filled area equals the real quota.
+function channelLiquid(channel,value) {const capacity=polygonArea(channel.polygon);return {polygon:channel.polygon,channel,fraction:value,capacity,volume:value===null?null:value*capacity,level:null,kind:'channel'}}
+function channelFill(liquid,time=0,motion=1) {
+ const ch=liquid.channel,f=liquid.fraction,format=p=>p.map(n=>Number(n.toFixed(3))).join(' ');
+ if(f===null||!(f>0))return {polygon:[],fill:'',surface:'',amplitude:0,front:null};
+ if(f>=1)return {polygon:ch.polygon,fill:fluidPath(ch.polygon),surface:'',amplitude:0,front:null};
+ const fromEnd=ch.drainsFrom==='upstream',L=fromEnd?[...ch.left].reverse():ch.left,R=fromEnd?[...ch.right].reverse():ch.right,n=L.length-1;
+ const amplitude=Math.max(0,motion)*1.1*Math.min(1,f*8,(1-f)*8),delta=amplitude*Math.sin(time*.0042)/(ch.length/n);
+ const at=(a,s)=>{const i=Math.max(0,Math.min(n-1,Math.floor(s))),t=Math.max(0,Math.min(n,s))-i;return[a[i][0]+(a[i+1][0]-a[i][0])*t,a[i][1]+(a[i+1][1]-a[i][1])*t]};
+ const build=s=>{const sl=Math.max(0,Math.min(n,s+delta)),sr=Math.max(0,Math.min(n,s-delta)),l=L.slice(0,Math.floor(sl)+1),r=R.slice(0,Math.floor(sr)+1),a=at(L,sl),b=at(R,sr);l.push(a);r.push(b);return {polygon:[...l,...r.reverse()],front:[a,b]}};
+ const target=f*liquid.capacity;let lo=-Math.abs(delta),hi=n+Math.abs(delta);
+ for(let i=0;i<40;i++){const m=(lo+hi)/2;if(polygonArea(build(m).polygon)<target)lo=m;else hi=m}
+ const r=build((lo+hi)/2);
+ return {polygon:r.polygon,fill:fluidPath(r.polygon),surface:`M${format(r.front[0])}L${format(r.front[1])}`,amplitude,front:r.front}
 }
 function waveArea(p,points,offset=0) {
  let area=0;const left=points[0][0],step=points[1][0]-left;
@@ -299,20 +344,25 @@ function applyFluidFrame(svg,frame) {
  const receiver=svg.querySelector('[data-bamboo-receiver]');if(receiver)receiver.style.transform=`rotate(${frame.angle}deg) scale(0.44)`;
  const cavity=svg.querySelector('[data-fluid-cavity]');if(cavity)cavity.setAttribute('points',frame.bamboo.polygon.map(p=>p.join(',')).join(' '));
  for(const name of ['W','S','cycle']){
-  const liquid=name==='cycle'?frame.bamboo:frame[name],wave=liquidWave(liquid,frame.time,frame.motion,name==='S'?frame.jet.opacity*.8:0);
-  const node=svg.querySelector(`[data-fluid-liquid="${name}"]`),surface=svg.querySelector(`[data-fluid-surface="${name}"]`);
-  if(node){node.setAttribute('d',wave.fill);node.setAttribute('data-visual-fraction',liquid.fraction===null?'unknown':round(liquid.fraction));node.setAttribute('data-liquid-level',round(liquid.level));node.setAttribute('data-liquid-volume',liquid.volume===null?'unknown':round(liquid.volume));node.style.opacity=liquid.fraction===null||liquid.fraction<=0?'0':'1'}
-  if(surface){surface.setAttribute('d',wave.surface);surface.style.opacity=liquid.fraction===null||liquid.fraction<=0?'0':'.85'}
-  if(name==='S'){const clip=svg.querySelector('[data-session-flow-clip]');if(clip)clip.setAttribute('d',wave.fill);const current=svg.querySelector('[data-session-current]');if(current){current.setAttribute('stroke-dashoffset',frame.motion?String(-(frame.time*.028%36)):'0');current.style.opacity=liquid.fraction!==null&&liquid.fraction>0?'.5':'0'}}
+  const liquid=name==='cycle'?frame.bamboo:frame[name],impact=name==='S'?frame.jet.opacity*.8:0;
+  const wave=liquid.kind==='channel'?channelFill(liquid,frame.time,frame.motion*(1+impact)):liquidWave(liquid,frame.time,frame.motion,impact);
+  const node=svg.querySelector(`[data-fluid-liquid="${name}"]`),surface=svg.querySelector(`[data-fluid-surface="${name}"]`),empty=liquid.fraction===null||liquid.fraction<=0;
+  if(node){node.setAttribute('d',wave.fill);node.setAttribute('data-visual-fraction',liquid.fraction===null?'unknown':round(liquid.fraction));node.setAttribute('data-liquid-level',liquid.level===null?'channel':round(liquid.level));node.setAttribute('data-liquid-volume',liquid.volume===null?'unknown':round(liquid.volume));node.style.opacity=empty?'0':'1'}
+  if(surface){surface.setAttribute('d',wave.surface);surface.style.opacity=empty?'0':'.85'}
+  if(liquid.kind==='channel'){
+   const key=name==='W'?'weekly':'session',clip=svg.querySelector(`[data-${key}-flow-clip]`),current=svg.querySelector(`[data-${key}-current]`);if(clip)clip.setAttribute('d',wave.fill);
+   // W flows from its spring toward the outlet (path start); S flows downstream (path end).
+   if(current){current.setAttribute('stroke-dashoffset',frame.motion?String((name==='W'?1:-1)*(frame.time*.028%36)):'0');current.style.opacity=empty?'0':'.5'}
+  }
  }
  const jet=svg.querySelector('[data-bamboo-pour]');if(jet){jet.setAttribute('d',fluidJetPath(frame.jet));jet.style.opacity=String(frame.jet.opacity)}
  const internal=svg.querySelector('[data-fluid-internal]');if(internal)internal.style.opacity=String(frame.jet.opacity*.65);
  const inlet=svg.querySelector('[data-bamboo-inflow]');if(inlet){inlet.style.opacity=frame.flowing?'.9':'0';inlet.setAttribute('data-bamboo-flow',frame.flowing?'running':'stopped')}
- const splash=svg.querySelector('[data-fluid-splash]');if(splash){const y=frame.S.level,[a,b]=sessionSurfaceSpan(frame.S.polygon,y),cx=(a+b)/2;splash.setAttribute('d',`M${a} ${y}Q${cx} ${y-3.6*frame.jet.opacity} ${b} ${y}`);splash.style.opacity=String(frame.jet.opacity*.7)}
+ const splash=svg.querySelector('[data-fluid-splash]');if(splash){const [x,y]=FLUID_GEOMETRY.channel.inlet,o=frame.jet.opacity,r=2.5+4.5*((frame.time%650)/650),ry=r*CAMERA_K*.55;splash.setAttribute('d',`M${round(x-r)} ${y}A${round(r)} ${round(ry)} 0 1 0 ${round(x+r)} ${y}A${round(r)} ${round(ry)} 0 1 0 ${round(x-r)} ${y}`);splash.style.opacity=String(o*.7)}
  for(const node of svg.querySelectorAll('[data-butterfly]')){
   const b=frame.motion?butterflyFlight(frame.time,Number(node.getAttribute('data-butterfly'))):null;
   node.setAttribute('data-butterfly-state',b?(b.perched?'resting':'flying'):'away');node.style.opacity=b?String(Number(b.opacity.toFixed(3))):'0';
-  if(b){node.setAttribute('transform',`translate(${round(b.x)} ${round(b.y)}) scale(${b.facing*1.35} 1.35)`);const wings=node.querySelector('[data-butterfly-wings]');if(wings)wings.setAttribute('transform',`scale(${round(b.flap)} 1)`)}
+  if(b){node.setAttribute('transform',`translate(${round(b.x)} ${round(b.y)}) rotate(${round(b.angle)}) scale(.9)`);const wings=node.querySelector('[data-butterfly-wings]');if(wings)wings.setAttribute('transform',`scale(${round(b.flap)} 1)`)}
  }
  svg.setAttribute('data-physical-angle',round(frame.angle));svg.setAttribute('data-fluid-motion',frame.motion?'waves':'reduced');
 }
@@ -323,36 +373,75 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
  const rainbow='usage-liquid-color 8s ease-in-out infinite';
  const palette=['#087bff','#6424c8','#c41ddf','#e91e9a','#ff4fae','#ff8a18','#087bff'];
  const stops=palette.map((stopColor,i)=>jsx('stop',{offset:`${i/(palette.length-1)*100}%`,stopColor},`siri-${i}`));
+ const gradient=(id,list,props={})=>jsxs('linearGradient',{id:uid(id),x1:'0%',y1:'0%',x2:'0%',y2:'100%',...props,children:list.map(([offset,stopColor,stopOpacity=1],i)=>jsx('stop',{offset,stopColor,stopOpacity},i))});
+ const blur=(id,deviation)=>jsx('filter',{id:uid(id),filterUnits:'userSpaceOnUse',x:-20,y:-20,width:340,height:306,children:jsx('feGaussianBlur',{stdDeviation:deviation})});
  const glassBody='M145 114Q163 112 178 114Q184 109 190 114H226Q232 109 238 114H258Q271 136 258 158H238Q232 163 226 158H190Q184 163 178 158H113Z';
- const liquid=(name,data)=>{const wave=liquidWave(data,frame.time);return jsx('g',{'data-fluid-glow':name,filter:paint('liquid-glow'),children:jsxs('g',{clipPath:paint(name==='cycle'?'cavity':`tank-${name}`),className:'usage-aurora-reservoir',style:{animation:rainbow},children:[
-  jsx('path',{'data-fluid-liquid':name,'data-bamboo-level':name==='cycle'?'cycle':undefined,'data-visual-fraction':data.fraction===null?'unknown':data.fraction,'data-liquid-volume':data.volume??'unknown','data-liquid-level':data.level,d:wave.fill,fill:paint('liquid'),style:{opacity:data.fraction===null||data.fraction<=0?0:1}}),
-  jsx('path',{'data-fluid-surface':name,d:wave.surface,fill:'none',stroke:paint('liquid'),strokeOpacity:.9,strokeWidth:.45,vectorEffect:'non-scaling-stroke',style:{opacity:data.fraction===null||data.fraction<=0?0:.85}})
+ const fillOf=data=>data.kind==='channel'?channelFill(data,frame.time):liquidWave(data,frame.time);
+ const liquid=(name,data)=>{const wave=fillOf(data),flat=data.kind==='channel';return jsx('g',{'data-fluid-glow':name,filter:paint('liquid-glow'),children:jsxs('g',{clipPath:paint(name==='cycle'?'cavity':`tank-${name}`),className:'usage-aurora-reservoir',style:{animation:rainbow},children:[
+  jsx('path',{'data-fluid-liquid':name,'data-bamboo-level':name==='cycle'?'cycle':undefined,'data-visual-fraction':data.fraction===null?'unknown':data.fraction,'data-liquid-volume':data.volume??'unknown','data-liquid-level':data.level??'channel',d:wave.fill,fill:paint('liquid'),style:{opacity:data.fraction===null||data.fraction<=0?0:1}}),
+  jsx('path',{'data-fluid-surface':name,d:wave.surface,fill:'none',stroke:flat?'#ffffff':paint('liquid'),strokeOpacity:flat?.6:.9,strokeWidth:flat?.6:.45,strokeLinecap:'round',vectorEffect:'non-scaling-stroke',style:{opacity:data.fraction===null||data.fraction<=0?0:.85}})
  ]})})};
- // Both reservoirs are carved beds: W in the rock face, S in the ground.
- const tank=(name,value)=>jsxs('g',{'data-bamboo-reservoir':name,'data-reservoir-remaining':value,'data-carved-in':name==='W'?'rock':'ground',children:[
-  jsx('path',{d:fluidPath(g[name]),fill:name==='W'?'#0a0812':'#0c0a10',fillOpacity:.92,stroke:'#000',strokeOpacity:.35,strokeWidth:1.3}),liquid(name,frame[name]),
-  name==='S'?jsxs('g',{clipPath:paint('tank-S'),children:[jsx('g',{clipPath:paint('session-water'),children:jsx('path',{'data-session-current':true,d:g.channel.d,fill:'none',stroke:'#b176ff',strokeOpacity:.7,strokeWidth:1.1,strokeDasharray:'6 30',strokeLinecap:'round'})}),jsx('path',{'data-fluid-internal':'S','data-session-channel':true,d:g.channel.d,fill:'none',stroke:paint('liquid'),strokeWidth:2.2,strokeLinecap:'round',style:{opacity:frame.jet.opacity*.65,animation:rainbow}}),jsx('path',{'data-fluid-splash':'S',fill:'none',stroke:white,strokeWidth:.8,style:{opacity:0}})]}):null,
-  jsx('path',{d:fluidPath(g[name]),fill:'none',stroke:name==='W'?'#b6a8e0':'#a596c8',strokeOpacity:name==='W'?.6:.7,strokeWidth:.55,vectorEffect:'non-scaling-stroke'}),
-  value===null?jsx('text',{x:name==='W'?226:154,y:name==='W'?52:226,textAnchor:'middle',fontFamily:'system-ui',fontSize:name==='W'?21:15*.9,fontWeight:650,fill:muted,children:'؟'}):null
+ // A carved bed: the far inner wall catches light, the floor sits lower, so it
+ // shows shifted toward the camera inside the opening.
+ const tank=(name,value)=>{const ch=name==='W'?g.weekly:g.channel,onRock=name==='W',key=onRock?'weekly':'session',mid=ch.points[Math.floor(ch.points.length/2)];
+  return jsxs('g',{'data-bamboo-reservoir':name,'data-reservoir-remaining':value,'data-carved-in':onRock?'rock':'ground','data-drains-from':ch.drainsFrom,children:[
+   jsx('path',{d:fluidPath(g[name]),fill:onRock?'#4d4856':'#5c4b3b'}),
+   jsx('g',{clipPath:paint(`tank-${name}`),children:jsx('path',{'data-channel-bed':name,d:fluidPath(g[name].map(p=>[p[0],p[1]+(onRock?2.3:2.1)])),fill:onRock?'#16141b':'#1a1510'})}),
+   liquid(name,frame[name]),
+   jsxs('g',{clipPath:paint(`tank-${name}`),children:[
+    jsx('g',{clipPath:paint(`${key}-water`),children:jsx('path',{[`data-${key}-current`]:true,d:ch.d,fill:'none',stroke:'#f1e8ff',strokeOpacity:.6,strokeWidth:.8,strokeDasharray:'5 31',strokeLinecap:'round'})}),
+    name==='S'?jsx('path',{'data-fluid-internal':'S','data-session-channel':true,d:ch.d,fill:'none',stroke:paint('liquid'),strokeWidth:2.2,strokeLinecap:'round',style:{opacity:frame.jet.opacity*.65,animation:rainbow}}):null,
+    name==='S'?jsx('path',{'data-fluid-splash':'S',fill:'none',stroke:white,strokeWidth:.8,style:{opacity:0}}):null
+   ]}),
+   jsx('path',{d:fluidPath(g[name]),fill:'none',stroke:onRock?'#d7d0e4':'#b39b7c',strokeOpacity:onRock?.3:.32,strokeWidth:.5,vectorEffect:'non-scaling-stroke'}),
+   value===null?jsx('text',{x:onRock?230:mid[0],y:onRock?30:mid[1]-6,textAnchor:'middle',fontFamily:'system-ui',fontSize:onRock?16:13.5,fontWeight:650,fill:muted,children:'؟'}):null
+  ]})};
+ const moss=(cx,cy,rx,ry,key)=>jsx('ellipse',{cx,cy,rx,ry,fill:paint('moss')},key);
+ const groundNode=jsxs('g',{'data-ground':'oblique-45',children:[
+  jsx('path',{'data-ground-plane':true,d:fluidPath(g.ground),fill:paint('earth'),mask:`url(#${uid('ground-fade')})`,filter:paint('grain')}),
+  jsx('path',{d:fluidPath(g.S),fill:'none',stroke:'#130e0a',strokeOpacity:.6,strokeWidth:7,strokeLinejoin:'round',filter:paint('soft')}),
+  ...g.grass.map(([x,y,s],i)=>moss(x,y+.4,5.6*s,1.9*s,`moss-${i}`)),
+  ...g.pebbles.map(([x,y,r],i)=>jsx('ellipse',{cx:x,cy:y,rx:r,ry:r*.66,fill:i%3?'#6d6672':'#8a828f',fillOpacity:.7},`pebble-${i}`)),
+  jsx('ellipse',{'data-contact-shadow':'stand',cx:191.4,cy:165,rx:15,ry:3.4,fill:'#000',fillOpacity:.45,filter:paint('soft')})
  ]});
  const rock=jsxs('g',{'data-rock':'W',children:[
-  jsx('path',{'data-rock-body':true,d:fluidPath(g.rock),fill:paint('rock'),stroke:'#8e83b4',strokeOpacity:.45,strokeWidth:.6,strokeLinejoin:'round',vectorEffect:'non-scaling-stroke'}),
-  jsx('path',{d:'M180 29Q214 10 264 14Q284 22 292 38',fill:'none',stroke:white,strokeOpacity:.16,strokeWidth:2.2,strokeLinecap:'round'}),
-  jsx('path',{d:'M262 118l-7 13 4 10M268 176l7 11-4 12M249 222l8 9M214 26l-9 5M286 70l-6 8',fill:'none',stroke:'#07060b',strokeOpacity:.55,strokeWidth:.9,strokeLinecap:'round',strokeLinejoin:'round'}),
-  jsx('path',{d:'M244 130q8 -4 14 2M240 196q7 -3 12 3',fill:'none',stroke:'#c9bdf0',strokeOpacity:.12,strokeWidth:1.2,strokeLinecap:'round'})
+  jsx('ellipse',{'data-contact-shadow':'rock',cx:244,cy:119,rx:62,ry:8,fill:'#000',fillOpacity:.55,filter:paint('soft')}),
+  jsxs('g',{filter:paint('grain'),children:[
+   jsx('path',{'data-rock-body':true,d:fluidPath(g.rock),fill:paint('rock-face'),stroke:'#110f15',strokeOpacity:.6,strokeWidth:.6,strokeLinejoin:'round',vectorEffect:'non-scaling-stroke'}),
+   ...g.weekly.facets.map(f=>jsx('path',{'data-rock-facet':f.shade,d:fluidPath(f.points),fill:f.shade==='lit'?'#8a8494':f.shade==='mid'?'#4a4654':'#1d1b22',fillOpacity:f.shade==='lit'?.45:.5,stroke:'#0c0b10',strokeOpacity:.35,strokeWidth:.5,strokeLinejoin:'round'},f.shade)),
+   jsx('path',{d:'M214 99q10 2 20 -2M262 109q12 1 24 -4M291 84q-3 12 0 24M232 92q-4 9 0 17M268 92q5 8 2 18',fill:'none',stroke:'#0d0b10',strokeOpacity:.45,strokeWidth:.7,strokeLinecap:'round'}),
+   jsx('path',{d:'M201 88q6 -2 11 0M246 97q7 1 13 -1M272 101q6 1 10 -2',fill:'none',stroke:'#cfc8dc',strokeOpacity:.14,strokeWidth:.9,strokeLinecap:'round'}),
+   jsx('path',{d:fluidPath(g.plateau.map(p=>[p[0],p[1]+2.4])),fill:'#0b0a0e',fillOpacity:.5}),
+   jsx('path',{'data-rock-top':true,d:fluidPath(g.plateau),fill:paint('rock-top')}),
+   jsx('path',{d:fluidPath(g.plateau),fill:'none',stroke:'#ece6f6',strokeOpacity:.26,strokeWidth:.7,vectorEffect:'non-scaling-stroke'}),
+   moss(185,19,6,2.2,'m1'),moss(266,79,10,2.4,'m2'),moss(294.5,45,2.6,7,'m3'),moss(206,13.5,7,1.9,'m4'),moss(282,118,11,2.8,'m5'),moss(214,105.5,8,2.2,'m6'),
+   jsx('ellipse',{'data-spring':'W',cx:291.5,cy:21.2,rx:3.6,ry:1.9,fill:'#08070b'})
+  ]})
  ]});
- const stones=SCENE_STONES.map(([x,y,rx,ry],i)=>jsxs('g',{'data-stone':i,children:[jsx('ellipse',{cx:x,cy:y,rx,ry,fill:paint('stone'),stroke:'#000',strokeOpacity:.3,strokeWidth:.4}),jsx('ellipse',{cx:x-rx*.25,cy:y-ry*.4,rx:rx*.45,ry:ry*.28,fill:white,fillOpacity:.13})]},`stone-${i}`));
- const grass=SCENE_GRASS.map(([x,y,s],i)=>jsx('g',{'data-grass':i,className:'usage-grass',style:{transformBox:'fill-box',transformOrigin:'50% 100%',animation:`usage-grass-sway ${(3.1+(i%4)*.55).toFixed(2)}s ease-in-out ${(-i*.83).toFixed(2)}s infinite alternate`},
-  children:[[-4.2,10,-.8],[-1.6,14,.3],[1,12.5,1.4],[3.6,9,2.6],[-2.8,7.5,-2]].map(([dx,h,lean],k)=>jsx('path',{d:`M${x+dx*s-.7*s} ${y}Q${x+dx*s+lean*.4*s} ${y-h*.55*s} ${x+dx*s+lean*s} ${y-h*s}Q${x+dx*s+lean*.4*s+.9*s} ${y-h*.5*s} ${x+dx*s+.7*s} ${y}Z`,fill:paint(k%2?'grass-b':'grass-a')},`blade-${k}`))},`grass-${i}`));
- const butterflies=[0,1].map(i=>jsx('g',{'data-butterfly':i,'data-butterfly-state':'away',style:{opacity:0},children:jsxs('g',{children:[
-  jsxs('g',{'data-butterfly-wings':true,children:[
-   jsx('path',{d:'M0 0C-3 -7 -9 -7 -8.5 -2.5C-8 0.5 -3 1 0 0ZM0 0C-2.5 1.5 -6.5 5 -4.5 6.5C-2.5 7.5 -0.5 3 0 0Z',fill:paint(i?'wing-b':'wing-a'),fillOpacity:.95}),
-   jsx('path',{d:'M0 0C3 -7 9 -7 8.5 -2.5C8 0.5 3 1 0 0ZM0 0C2.5 1.5 6.5 5 4.5 6.5C2.5 7.5 0.5 3 0 0Z',fill:paint(i?'wing-b':'wing-a'),fillOpacity:.95})
-  ]}),
-  jsx('path',{d:'M0 -3.5L0 4.5M0 -3.5Q-1 -6 -2.2 -6.8M0 -3.5Q1 -6 2.2 -6.8',fill:'none',stroke:'#1a1426',strokeWidth:1,strokeLinecap:'round'})
+ const stoneNode=(s,i)=>jsxs('g',{'data-stone':i,children:[
+  jsx('path',{d:fluidPath(s.footprint.map(p=>[p[0]+1.5,p[1]+1.1])),fill:'#000',fillOpacity:.5,filter:paint('soft')}),
+  jsx('path',{d:fluidPath(s.outline),fill:paint('stone'),stroke:'#0e0c11',strokeOpacity:.45,strokeWidth:.4}),
+  jsx('ellipse',{cx:s.x-s.r*.35,cy:s.y-s.r*.72*CAMERA_K,rx:s.r*.45,ry:s.r*.2,fill:'#fff',fillOpacity:.17})
+ ]},`stone-${i}`);
+ const blades=[[-3.6,8,-3.2],[-2.4,11.5,-1.6],[-1,13,-.4],[.3,12,1],[1.5,10,2.4],[2.8,7.5,3.6],[-.4,9,-2.4],[.9,6.5,.2]];
+ const tuftNode=([x,y,s],i)=>jsx('g',{'data-grass':i,className:'usage-grass',style:{transformBox:'fill-box',transformOrigin:'50% 100%',animation:`usage-grass-sway ${(3.1+(i%4)*.55).toFixed(2)}s ease-in-out ${(-i*.83).toFixed(2)}s infinite alternate`},
+  children:blades.map(([dx,h,lean],k)=>{const w=.5*s,bx=x+dx*s,tx=bx+lean*s,ty=y-h*s,cx=bx+lean*.25*s;return jsx('path',{d:`M${(bx-w).toFixed(2)} ${y}Q${cx.toFixed(2)} ${(y-h*.6*s).toFixed(2)} ${tx.toFixed(2)} ${ty.toFixed(2)}Q${(cx+w*.9).toFixed(2)} ${(y-h*.55*s).toFixed(2)} ${(bx+w).toFixed(2)} ${y}Z`,fill:paint(k===5?'grass-dry':k%3===0?'grass-b':'grass-a')},k)})},`grass-${i}`);
+ const wings=variant=>{const fill=paint(variant?'wing-b':'wing-a'),edge=variant?'#0a1330':'#1a0e07',side=sx=>jsxs('g',{transform:`scale(${sx} 1)`,children:[
+   jsx('path',{d:'M.5 .5C4.6 .5 6.1 2.8 5.1 4.8C4.1 6.3 1.6 5.4 .4 1.8Z',fill,stroke:edge,strokeWidth:.45}),
+   jsx('path',{d:'M.4 -1.1C2.4 -5.4 6.7 -6.7 7.4 -5.3C7.9 -3.7 5.7 -.9 .5 .3Z',fill,stroke:edge,strokeWidth:.5}),
+   jsx('path',{d:'M.6 -.7L6.4 -5M.6 -.3L6.9 -3.4M.6 0L5.2 -1.3M.6 .9L4.3 4.4M.6 .7L5.1 2.4',fill:'none',stroke:edge,strokeWidth:.28,strokeOpacity:.85}),
+   jsx('path',{d:'M7.4 -5.3C7.9 -3.7 5.7 -.9 3.6 -.3M5.1 4.8C4.1 6.3 2.6 5.9 1.8 4.8',fill:'none',stroke:edge,strokeWidth:.9}),
+   ...[[6.9,-4.6],[6.4,-3.3],[5.6,-2.1],[4.4,4.9],[5.2,3.4]].map(([cx,cy],k)=>jsx('circle',{cx,cy,r:.27,fill:'#fff',fillOpacity:.9},k))
+  ]},sx);return [side(1),side(-1)]};
+ const butterflies=[0,1].map(i=>jsx('g',{'data-butterfly':i,'data-butterfly-state':'away','data-butterfly-variant':i?'blue-morpho':'monarch',style:{opacity:0},children:jsxs('g',{children:[
+  jsx('g',{'data-butterfly-wings':true,children:wings(i)}),
+  jsx('ellipse',{cx:0,cy:2,rx:.55,ry:2.6,fill:'#1c1510'}),jsx('ellipse',{cx:0,cy:-.9,rx:.8,ry:1.15,fill:'#2a2019'}),jsx('circle',{cx:0,cy:-2.5,r:.6,fill:'#1c1510'}),
+  jsx('path',{d:'M-.2 -2.9Q-1 -5.4 -1.9 -6.6M.2 -2.9Q1 -5.4 1.9 -6.6',fill:'none',stroke:'#1c1510',strokeWidth:.35,strokeLinecap:'round'}),
+  jsx('circle',{cx:-1.9,cy:-6.6,r:.38,fill:'#1c1510'}),jsx('circle',{cx:1.9,cy:-6.6,r:.38,fill:'#1c1510'})
  ]})},`butterfly-${i}`));
- const lip=g.weekly.lip,spring=g.weekly.spring,mouth=bambooPoint([144.4,98]);
- return jsxs('svg',{'data-bamboo-scene':expanded?'expanded':'compact','data-material':'glass-bamboo','data-colour-style':'apple-reference-v10','data-scene':'rock-garden-v12','data-bamboo-scale':.44,'data-weekly-shape':'w-watercourse-rock','data-session-shape':'s-watercourse','data-fluid-engine':'gravity-volume-v7',
+ const lip=g.weekly.lip,mouth=bambooPoint([144.4,98]),from=g.weekly.points[3],feet=163.7;
+ const decor=[...g.stones.map((s,i)=>({y:s.y,node:stoneNode(s,i)})),...g.grass.map((t,i)=>({y:t[1],node:tuftNode(t,i)}))].sort((a,b)=>a.y-b.y);
+ return jsxs('svg',{'data-bamboo-scene':expanded?'expanded':'compact','data-material':'glass-bamboo','data-colour-style':'apple-reference-v10','data-scene':'rock-garden-v13','data-camera':'oblique-45','data-bamboo-scale':.44,'data-weekly-shape':'w-watercourse-rock','data-session-shape':'s-watercourse','data-fluid-engine':'gravity-volume-v7',
   'data-flow-from':'W','data-flow-via':'cycle','data-flow-to':'S','data-outlet-position':'bottom','data-source-pipe':'none',
   'data-cycle-state':m.tipped?'dumping':cycle.phase||'unknown','data-cycle-progress':cycle.progress,'data-cycle-reset':cycle.resetMs,'data-physical-angle':frame.angle,
   viewBox:'0 0 300 266',width:expanded?'100%':68,height:expanded?236:20,'aria-hidden':true,style:{display:'block',flexShrink:0,overflow:'hidden'},children:[
@@ -362,26 +451,39 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
      jsx('feGaussianBlur',{in:'SourceGraphic',stdDeviation:1.4,result:'near-halo'}),
      jsxs('feMerge',{children:[jsx('feMergeNode',{in:'wide-halo'}),jsx('feMergeNode',{in:'near-halo'}),jsx('feMergeNode',{in:'SourceGraphic'})]})
     ]}),
+    // Static mineral grain for stone and soil, so surfaces read as material, not flat fills.
+    jsxs('filter',{id:uid('grain'),filterUnits:'userSpaceOnUse',x:-20,y:-20,width:340,height:306,children:[
+     jsx('feTurbulence',{type:'fractalNoise',baseFrequency:1.1,numOctaves:2,seed:11,result:'noise'}),
+     jsx('feColorMatrix',{in:'noise',type:'matrix',values:'0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.1 0 0 0 -.5',result:'dark'}),
+     jsx('feColorMatrix',{in:'noise',type:'matrix',values:'0 0 0 0 .85  0 0 0 0 .82  0 0 0 0 .8  -.9 0 0 0 .3',result:'light'}),
+     jsx('feComposite',{in:'dark',in2:'SourceGraphic',operator:'in',result:'dark-in'}),
+     jsx('feComposite',{in:'light',in2:'SourceGraphic',operator:'in',result:'light-in'}),
+     jsxs('feMerge',{children:[jsx('feMergeNode',{in:'SourceGraphic'}),jsx('feMergeNode',{in:'dark-in'}),jsx('feMergeNode',{in:'light-in'})]})
+    ]}),
+    blur('soft',2.2),blur('fade-blur',11),
+    jsx('mask',{id:uid('ground-fade'),maskUnits:'userSpaceOnUse',x:-20,y:-20,width:340,height:306,children:jsx('path',{d:fluidPath(g.ground),fill:'#fff',filter:paint('fade-blur')})}),
     jsxs('linearGradient',{id:uid('liquid'),'data-siri-gradient':true,x1:'0%',y1:'0%',x2:'100%',y2:'65%',children:stops}),
     jsxs('linearGradient',{id:uid('glass-body'),x1:'0%',y1:'0%',x2:'0%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:tint('.95','.03','155'),stopOpacity:.25}),jsx('stop',{offset:'25%',stopColor:tint('.80','.05','160'),stopOpacity:.045}),jsx('stop',{offset:'67%',stopColor:tint('.8','.04','185'),stopOpacity:.025}),jsx('stop',{offset:'100%',stopColor:tint('.75','.06','170'),stopOpacity:.2})]}),
     jsxs('linearGradient',{id:uid('glass-edge'),x1:'0%',y1:'0%',x2:'100%',y2:'90%',children:[jsx('stop',{offset:'0%',stopColor:white,stopOpacity:.55}),jsx('stop',{offset:'35%',stopColor:tint('.8','.07','160'),stopOpacity:.5}),jsx('stop',{offset:'70%',stopColor:white,stopOpacity:.4}),jsx('stop',{offset:'100%',stopColor:tint('.65','.06','175'),stopOpacity:.45})]}),
-    jsxs('linearGradient',{id:uid('rock'),x1:'20%',y1:'0%',x2:'70%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:'#4b4466'}),jsx('stop',{offset:'45%',stopColor:'#2a2540'}),jsx('stop',{offset:'100%',stopColor:'#16131f'})]}),
-    jsxs('radialGradient',{id:uid('ground'),children:[jsx('stop',{offset:'0%',stopColor:'#6b5f8f',stopOpacity:.32}),jsx('stop',{offset:'100%',stopColor:'#6b5f8f',stopOpacity:0})]}),
-    jsxs('linearGradient',{id:uid('stone'),x1:'0%',y1:'0%',x2:'0%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:'#7b7396'}),jsx('stop',{offset:'100%',stopColor:'#2e2a3c'})]}),
-    jsxs('linearGradient',{id:uid('grass-a'),x1:'0%',y1:'100%',x2:'0%',y2:'0%',children:[jsx('stop',{offset:'0%',stopColor:'#14653f'}),jsx('stop',{offset:'100%',stopColor:'#5fe08f'})]}),
-    jsxs('linearGradient',{id:uid('grass-b'),x1:'0%',y1:'100%',x2:'0%',y2:'0%',children:[jsx('stop',{offset:'0%',stopColor:'#0f5537'}),jsx('stop',{offset:'100%',stopColor:'#a6ef7c'})]}),
-    jsxs('linearGradient',{id:uid('wing-a'),x1:'0%',y1:'0%',x2:'100%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:'#ff4fae'}),jsx('stop',{offset:'100%',stopColor:'#ff8a18'})]}),
-    jsxs('linearGradient',{id:uid('wing-b'),x1:'0%',y1:'0%',x2:'100%',y2:'100%',children:[jsx('stop',{offset:'0%',stopColor:'#45e5ff'}),jsx('stop',{offset:'100%',stopColor:'#a16bff'})]}),
+    gradient('earth',[['0%','#544a3f'],['45%','#3f372e'],['100%','#28221b']]),
+    gradient('rock-face',[['0%','#625d6c'],['45%','#403c48'],['100%','#24212a']],{x2:'30%'}),
+    gradient('rock-top',[['0%','#a29dab'],['50%','#7d7887'],['100%','#5f5b69']],{x2:'100%'}),
+    gradient('stone',[['0%','#9a94a2'],['55%','#56515e'],['100%','#2a2730']]),
+    gradient('grass-a',[['0%','#a3e06e'],['100%','#1d5a32']]),gradient('grass-b',[['0%','#c6ec84'],['100%','#245f2c']]),gradient('grass-dry',[['0%','#d9c47a'],['100%','#4f6a2c']]),
+    gradient('wing-a',[['0%','#ffb04a'],['60%','#ea731c'],['100%','#b8430e']],{x2:'100%'}),gradient('wing-b',[['0%','#8fd6ff'],['55%','#2f7dff'],['100%','#1b3db4']],{x2:'100%'}),
+    jsxs('radialGradient',{id:uid('moss'),children:[jsx('stop',{offset:'0%',stopColor:'#5e7d36',stopOpacity:.75}),jsx('stop',{offset:'100%',stopColor:'#5e7d36',stopOpacity:0})]}),
     ...['W','S'].map(name=>jsx('clipPath',{id:uid(`tank-${name}`),children:jsx('path',{d:fluidPath(g[name])})},`clip-${name}`)),
-    jsx('clipPath',{id:uid('session-water'),children:jsx('path',{'data-session-flow-clip':true,d:liquidWave(frame.S,frame.time).fill})}),
+    jsx('clipPath',{id:uid('session-water'),children:jsx('path',{'data-session-flow-clip':true,d:fillOf(frame.S).fill})}),
+    jsx('clipPath',{id:uid('weekly-water'),children:jsx('path',{'data-weekly-flow-clip':true,d:fillOf(frame.W).fill})}),
     jsx('clipPath',{id:uid('cavity'),children:jsx('polygon',{'data-fluid-cavity':true,points:frame.bamboo.polygon.map(p=>p.join(',')).join(' ')})})
    ]}),
+   groundNode,
    rock,
+   tank('S',sessionLeft),
    tank('W',weeklyLeft),
    !cycle.artOnly?jsx('text',{'data-weekly-remaining':weeklyLeft,'data-text-state':Number.isFinite(weeklyLeft)?'actual':'unknown',x:76,y:54,textAnchor:'middle',fontFamily:'system-ui',fontSize:16,fontWeight:650,fill:white,children:Number.isFinite(weeklyLeft)?`${weeklyLeft.toLocaleString('en-US',{maximumFractionDigits:1})}%`:'—'}):null,
    !cycle.artOnly?jsx('text',{x:76,y:71,textAnchor:'middle',fontFamily:'system-ui',fontSize:9.5,fill:muted,children:Number.isFinite(weeklyLeft)?'متبقٍ أسبوعيًا':'الحصة غير متاحة'}):null,
-   jsx('ellipse',{'data-ground':true,cx:192,cy:257,rx:118,ry:6.5,fill:paint('ground')}),
-   ...stones,
+   ...decor.filter(d=>d.y<feet).map(d=>d.node),
    jsx('path',{d:'M185 143L175 199M197 143L209 199',style:{transform:'scale(0.44)',transformOrigin:'191px 136px'},fill:'none',stroke:paint('glass-edge'),strokeWidth:4,strokeLinecap:'round'}),
    liquid('cycle',frame.bamboo),
    jsxs('g',{'data-bamboo-receiver':'cycle','data-bamboo-mouth':'bevel-upper-shorter','data-tipped':m.tipped,'data-upper-mouth-x':145,'data-lower-mouth-x':113,
@@ -400,9 +502,8 @@ function bambooScene(sessionLeft,weeklyLeft,id,expanded=false,cycle={progress:nu
    frame.bamboo.fraction===null?jsx('text',{'data-bamboo-unknown':'cycle',x:bambooPoint([212,157])[0],y:bambooPoint([212,157])[1],textAnchor:'middle',fontSize:7,fontWeight:650,fill:muted,children:'؟'}):null,
    jsx('circle',{cx:191,cy:136,r:4.2*.44,fill:paint('glass-body'),stroke:paint('glass-edge'),strokeWidth:1}),
    jsx('circle',{cx:bambooPoint([190.3,135.3])[0],cy:bambooPoint([190.3,135.3])[1],r:1.4*.44,fill:white,fillOpacity:.65}),
-   jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-inflow':'W','data-bamboo-flow':frame.flowing?'running':'stopped',d:`M${spring.join(' ')}Q${lip[0]-.6} ${lip[1]-.4} ${lip[0]-.5} ${lip[1]+3}C${lip[0]-.5} ${lip[1]+30} ${mouth[0]} ${mouth[1]-30} ${mouth.join(' ')}`,fill:'none',stroke:paint('liquid'),strokeWidth:2.4,strokeLinecap:'round',strokeDasharray:'7 2',className:'usage-bamboo-flow',style:{opacity:frame.flowing?.9:0,animation:`usage-bamboo-flow 1.3s linear infinite, ${rainbow}`}})}),
-   tank('S',sessionLeft),
-   ...grass,
+   jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-inflow':'W','data-bamboo-flow':frame.flowing?'running':'stopped',d:`M${from.join(' ')}L${lip.join(' ')}Q${(lip[0]+mouth[0])/2} ${lip[1]} ${mouth.join(' ')}`,fill:'none',stroke:paint('liquid'),strokeWidth:2.4,strokeLinecap:'round',strokeDasharray:'7 2',className:'usage-bamboo-flow',style:{opacity:frame.flowing?.9:0,animation:`usage-bamboo-flow 1.3s linear infinite, ${rainbow}`}})}),
+   ...decor.filter(d=>d.y>=feet).map(d=>d.node),
    jsx('g',{filter:paint('liquid-glow'),children:jsx('path',{'data-bamboo-pour':'S',d:fluidJetPath(frame.jet),fill:paint('liquid'),style:{opacity:frame.jet.opacity,animation:rainbow}})}),
    ...butterflies
   ]})
@@ -542,7 +643,7 @@ function UsageCorner() {
  useEffect(()=>{usageView.set({...source,cycle,selectedAccount,onSelectAccount:id=>setSelectedAccount({provider:rawProvider?.slug,id})})})
  useEffect(()=>()=>usageView.set(null),[])
  useEffect(()=>observeNativeSurfaces(layerNode.current),[])
- useEffect(()=>{try{widgetStorage?.set('floating-art-v1',geometryRef.current);widgetStorage?.set('fluid-engine-v7',true);widgetStorage?.set('proportions-v8',true);widgetStorage?.set('siri-neon-v9',true);widgetStorage?.set('apple-reference-v10',true);widgetStorage?.set('s-watercourse-v11',true);widgetStorage?.set('rock-garden-v12',true)}catch{}},[])
+ useEffect(()=>{try{widgetStorage?.set('floating-art-v1',geometryRef.current);widgetStorage?.set('fluid-engine-v7',true);widgetStorage?.set('proportions-v8',true);widgetStorage?.set('siri-neon-v9',true);widgetStorage?.set('apple-reference-v10',true);widgetStorage?.set('s-watercourse-v11',true);widgetStorage?.set('rock-garden-v12',true);widgetStorage?.set('rock-garden-v13',true)}catch{}},[])
  useEffect(()=>{if(!open)return;const key=e=>{if(e.key==='Escape')setOpen(false)};document.addEventListener('keydown',key);return()=>document.removeEventListener('keydown',key)},[open])
  useEffect(()=>{const fit=()=>{const next=clampFloatingRect(geometryRef.current,floatingViewport());geometryRef.current=next;setGeometry(next)};window.addEventListener('resize',fit);return()=>window.removeEventListener('resize',fit)},[])
  function move(next,persist=false) {
@@ -581,7 +682,7 @@ export default {
  id:'usage-meter',name:'استهلاك الموديل والرصيد',
  register(ctx) {
   widgetStorage=ctx.storage||null
-  console.info('[usage-meter] rock-garden-v12 loaded')
+  console.info('[usage-meter] rock-garden-v13 loaded')
   ctx.register({id:'usage-corner-auto-v2',area:'statusBar.left',order:-10000,render:()=>jsx(UsageCorner,{})})
  }
 }

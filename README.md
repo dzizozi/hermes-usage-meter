@@ -2,7 +2,7 @@
 
 A tiny floating widget for **[Hermes Agent](https://github.com/NousResearch/hermes-agent) Desktop**
 (Windows, macOS and Linux) that shows your model's real subscription quota as a living
-Japanese rock garden fountain (*shishi-odoshi*).
+Japanese rock garden fountain (*shishi-odoshi*), seen from a 45° camera.
 
 ![Usage meter preview](docs/rock-garden-preview.png)
 
@@ -10,9 +10,9 @@ Japanese rock garden fountain (*shishi-odoshi*).
 
 | Part | Meaning |
 |---|---|
-| **W** watercourse, carved in the rock | Remaining **weekly** quota. Water leaves from its top-left end into the bamboo |
+| **W** channel, carved into the top of a boulder | Remaining **weekly** quota. Water rises at the right-hand spring and leaves from the left end into the bamboo. As the week is used, the channel dries from the spring while the outlet end stays wet |
 | Glass bamboo | Time until the 5-hour session window resets, from the provider's real `resets_at` |
-| **S** watercourse, in the ground | Remaining **session / 5-hour** quota. The level glides down gradually as you use it |
+| **S** stream, lying flat in the ground | Remaining **session / 5-hour** quota. Water pools at the downstream end; with use it recedes gradually from the inlet |
 
 When the provider confirms a renewal, the bamboo tips and pours once into S, which fills up
 to the new real balance.
@@ -82,7 +82,7 @@ The tests reuse the dev dependencies already present in a Hermes Agent checkout
 
 ```sh
 npm test               # 39 unit and fluid-physics tests (Node 20+)
-npm run test:browser   # 33 real-browser scenarios with React + React Query
+npm run test:browser   # 34 real-browser scenarios with React + React Query
 ```
 
 `HERMES_AGENT_DIR` points the browser test at a specific checkout. It tries Playwright's
@@ -93,11 +93,11 @@ Chromium, then Edge, then Chrome. All network data in the browser test is synthe
 ## بالعربية
 
 ويدجيت صغيرة عائمة لتطبيق **Hermes Agent Desktop** على ويندوز وماك ولينكس. تعرض حصة
-الاشتراك الحقيقية على شكل حديقة صخرية يابانية بنافورة خيزران:
+الاشتراك الحقيقية على شكل حديقة صخرية يابانية بنافورة خيزران، مرسومة من زاوية كاميرا 45°:
 
-- **W:** مجرى محفور في صخرة، يمثل الحصة الأسبوعية المتبقية، ويصب من طرفه الأيسر العلوي في القصبة.
+- **W:** مجرى متعرّج محفور في سطح صخرة موضوعة على الأرض، يمثل الحصة الأسبوعية. ينبع الماء من طرفه الأيمن ويصب من طرفه الأيسر في القصبة، ومع الاستهلاك يجف من جهة المنبع ويبقى ممتلئًا عند المصب.
 - **القصبة الزجاجية:** الوقت المتبقي حتى تجدد نافذة الخمس ساعات، حسب موعد المزوّد الفعلي.
-- **مجرى S:** مجرى في الأرض يمثل حصة الجلسة (5 ساعات)، وينخفض ماؤه تدريجيًا مع الاستخدام. حوله أحجار وحشائش تتمايل، وتزوره فراشة أو اثنتان كل 30 ثانية.
+- **مجرى S:** مجرى مستوٍ في الأرض يمثل حصة الجلسة (5 ساعات). يتجمع الماء في آخره، ومع الاستخدام ينحسر تدريجيًا من جهة القصبة. حوله أحجار وحشائش تتمايل، وتزوره فراشة أو اثنتان كل 30 ثانية.
 
 عند تأكيد المزوّد للتجدد، تنقلب القصبة وتسكب مرة واحدة في S.
 
